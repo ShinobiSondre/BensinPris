@@ -1,0 +1,44 @@
+name: Probe data sources
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        run: |
+          set +e
+          B=https://drivstoffpriser.github.io/Drivstoffpriser-App/data
+          curl -sS -m 60 -o stations.json $B/stations.json; echo "stations bytes: $(wc -c < stations.json)"
+          curl -sS -m 60 -o prices.json $B/prices.json; echo "prices bytes: $(wc -c < prices.json)"
+          python3 - <<'PY'
+          import json, collections
+          s = json.load(open("stations.json"))
+          print("STATIONS top type:", type(s).__name__)
+          if isinstance(s, dict):
+              print("STATIONS keys:", list(s.keys()))
+              arr = next((v for v in s.values() if isinstance(v, list)), [])
+          else:
+              arr = s
+          print("STATIONS count:", len(arr))
+          for x in arr[:3]: print("STATION:", json.dumps(x, ensure_ascii=False))
+          keys = collections.Counter(k for x in arr for k in x.keys()); print("STATION keys:", keys.most_common())
+          brands = collections.Counter(str(x.get("brand")) for x in arr); print("BRANDS:", brands.most_common(40))
+          ids = collections.Counter(str(x.get("id", ""))[:6] for x in arr); print("ID prefixes:", ids.most_common(5))
+          p = json.load(open("prices.json"))
+          print("PRICES keys:", list(p.keys()) if isinstance(p, dict) else "list")
+          rows = p["prices"] if isinstance(p, dict) else p
+          print("PRICES count:", len(rows))
+          print("fuelTypes:", collections.Counter(r.get("fuelType") for r in rows))
+          d = sorted(r.get("updatedAt","") for r in rows); print("updatedAt min/max:", d[0], d[-1])
+          print("updatedAt by month:", sorted(collections.Counter(x[:7] for x in d).items()))
+          sid = set(str(x.get("id")) for x in arr)
+          print("price stationIds found in stations:", sum(1 for r in rows if r.get("stationId") in sid), "/", len(rows))
+          print("sample rows:", json.dumps(rows[:3]))
+          PY
+          q='[out:json][timeout:25];nwr(around:10000,59.9133,10.7389)["amenity"="fuel"];out center tags;'
+          for u in https://overpass-api.de/api/interpreter https://overpass.kumi.systems/api/interpreter https://overpass.openstreetmap.fr/api/interpreter https://maps.mail.ru/osm/tools/overpass/api/interpreter; do
+            s=$(date +%s); code=$(curl -s -o o.json -w '%{http_code}' -m 40 --data-urlencode "data=$q" "$u"); echo "OVERPASS $u -> $code in $(( $(date +%s)-s ))s"
+          done
