@@ -328,20 +328,22 @@ private fun StationRow(spot: Spot, no: Boolean, now: Long, isCheapest: Boolean, 
                 Text(spot.station.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    listOf(Format.distance(spot.distanceM, no), spot.station.address).filter { it.isNotBlank() }.joinToString(" · "),
+                    listOf(spot.station.address, spot.station.city).filter { it.isNotBlank() }.joinToString(", "),
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
+                spot.price?.let { p -> AgeLabel(p.updatedAt, now, no) }
             }
             Spacer(Modifier.width(8.dp))
+            // Price on top, distance from you right under it.
             Column(horizontalAlignment = Alignment.End) {
                 val p = spot.price
                 if (p != null) {
                     Text(Format.price(p.price, no), style = MaterialTheme.typography.titleLarge.merge(Tabular), fontWeight = FontWeight.Bold)
-                    AgeLabel(p.updatedAt, now, no)
                 } else {
                     Text("–", style = MaterialTheme.typography.titleLarge, color = cs.onSurfaceVariant)
-                    Text(tr(no, "no price", "ingen pris"), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
                 }
+                Text(Format.distance(spot.distanceM, no), style = MaterialTheme.typography.labelLarge.merge(Tabular),
+                    color = cs.primary, fontWeight = FontWeight.SemiBold)
             }
             IconButton(onClick = onDrive) {
                 Icon(Icons.Filled.Navigation, tr(no, "Directions", "Veibeskrivelse"), tint = cs.primary)
