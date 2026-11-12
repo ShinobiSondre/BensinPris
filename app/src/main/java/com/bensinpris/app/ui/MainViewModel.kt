@@ -9,6 +9,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.bensinpris.app.data.CachedFeed
+import com.bensinpris.app.data.ChainStore
 import com.bensinpris.app.data.FuelType
 import com.bensinpris.app.data.MyPrices
 import com.bensinpris.app.data.Parse
@@ -50,6 +51,7 @@ data class UiState(
     /** True when the last download failed and older data is shown. */
     val offline: Boolean = false,
     val pricesFetchedAt: Long = 0L,
+    val chainsFetchedAt: Long = 0L,
     val selectedId: String? = null,
 ) {
     val selected: Spot? get() = selectedId?.let { id -> spots.firstOrNull { it.station.id == id } }
@@ -64,6 +66,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var stations: List<Station> = emptyList()
     private var community: PriceBook = emptyMap()
     private var mine: PriceBook = emptyMap()
+    private var chains: ChainStore.Snapshot = ChainStore.Snapshot(emptyList(), 0L)
     private var book: PriceBook = emptyMap()
 
     init {
@@ -80,6 +83,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             stations = CachedFeed.STATIONS.read(ctx)?.let(Parse::stations).orEmpty()
             community = CachedFeed.PRICES.read(ctx)?.let(Parse::prices).orEmpty()
             mine = MyPrices.load(ctx)
+            chains = ChainStore.read(ctx)
         }
         rebuild()
     }
@@ -96,6 +100,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         .onSuccess { stations = Parse.stations(it) }
                         .onFailure { failed = true }
                 }
+                if (force || ChainStore.isStale(ctx)) {
+                    runCatching { ChainStore.download(ctx) }
+                        .onSuccess { chains = it }
+                        .onFailure { failed = true }
+                }
                 if (force || CachedFeed.PRICES.isStale(ctx)) {
                     runCatching { CachedFeed.PRICES.download(ctx) { t -> t.contains("\"prices\"") } }
                         .onSuccess { community = Parse.prices(it) }
@@ -109,8 +118,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun rebuild() {
-        book = Parse.merge(community, mine)
-        _state.update { it.copy(stationCount = stations.size, pricesFetchedAt = CachedFeed.PRICES.fetchedAt(ctx)) }
+        book = Parse.merge(Parse.estimates(stations, chains.chains, chains.at), community, mine)
+        _state.update {
+            it.copy(stationCount = stations.size, pricesFetchedAt = CachedFeed.PRICES.fetchedAt(ctx), chainsFetchedAt = chains.at)
+        }
         recompute()
     }
 

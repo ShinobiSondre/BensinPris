@@ -150,7 +150,7 @@ fun HomeScreen(vm: MainViewModel) {
                         }
                     }
                 }
-                item(key = "footer") { Footer(s.pricesFetchedAt, s.stationCount, no, now) }
+                item(key = "footer") { Footer(s.pricesFetchedAt, s.chainsFetchedAt, s.stationCount, no, now) }
             }
         }
     }
@@ -254,15 +254,27 @@ private fun HeroCard(
         }
         Spacer(Modifier.height(14.dp))
         Row(verticalAlignment = Alignment.Bottom) {
+            if (price.isEstimate) {
+                Text("≈", color = Amber.copy(alpha = 0.8f), fontSize = 34.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp, end = 6.dp))
+            }
             Text(Format.price(price.price, no), color = Amber, fontSize = 56.sp, fontWeight = FontWeight.Black,
                 style = Tabular, lineHeight = 56.sp)
             Text(" kr/l", color = Amber.copy(alpha = 0.8f), fontSize = 20.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(bottom = 9.dp))
         }
-        AgeLabel(
-            price.updatedAt, now, no, color = Color.White.copy(alpha = 0.8f),
-            prefix = if (price.source == PriceSource.ME) tr(no, "Your price · ", "Din pris · ") else tr(no, "Reported ", "Meldt "),
+        PriceNote(
+            price, now, no, color = Color.White.copy(alpha = 0.8f),
+            prefix = when (price.source) {
+                PriceSource.ME -> tr(no, "Your price · ", "Din pris · ")
+                PriceSource.COMMUNITY -> tr(no, "Reported ", "Meldt ")
+                PriceSource.CHAIN -> ""
+            },
         )
+        if (price.isEstimate) {
+            Text(tr(no, "Not measured at this station. Check the pump.", "Ikke målt på stasjonen. Sjekk pumpa."),
+                color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.labelSmall)
+        }
         val save = summary.savingPerLitre
         if (save > 0) {
             Spacer(Modifier.height(12.dp))
@@ -331,14 +343,15 @@ private fun StationRow(spot: Spot, no: Boolean, now: Long, isCheapest: Boolean, 
                     listOf(spot.station.address, spot.station.city).filter { it.isNotBlank() }.joinToString(", "),
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
-                spot.price?.let { p -> AgeLabel(p.updatedAt, now, no) }
+                spot.price?.let { p -> PriceNote(p, now, no) }
             }
             Spacer(Modifier.width(8.dp))
             // Price on top, distance from you right under it.
             Column(horizontalAlignment = Alignment.End) {
                 val p = spot.price
                 if (p != null) {
-                    Text(Format.price(p.price, no), style = MaterialTheme.typography.titleLarge.merge(Tabular), fontWeight = FontWeight.Bold)
+                    Text(priceText(p, no), style = MaterialTheme.typography.titleLarge.merge(Tabular), fontWeight = FontWeight.Bold,
+                        color = if (p.isEstimate) cs.onSurface.copy(alpha = 0.75f) else cs.onSurface)
                 } else {
                     Text("–", style = MaterialTheme.typography.titleLarge, color = cs.onSurfaceVariant)
                 }
@@ -408,19 +421,21 @@ private fun Centered(text: String) {
 }
 
 @Composable
-private fun Footer(pricesAt: Long, stationCount: Int, no: Boolean, now: Long) {
+private fun Footer(pricesAt: Long, chainsAt: Long, stationCount: Int, no: Boolean, now: Long) {
     Column(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         val updated = if (pricesAt > 0) Format.age(pricesAt, now, no) else tr(no, "from the app", "fra appen")
+        val chains = if (chainsAt > 0) Format.age(chainsAt, now, no) else tr(no, "not yet", "ikke ennå")
         Text(
             tr(no,
-                "$stationCount stations. Prices are reported by drivers and may be out of date; check the pump. Price list updated $updated.",
-                "$stationCount stasjoner. Prisene er meldt av bilister og kan være utdatert; sjekk pumpa. Prislisten hentet $updated."),
+                "$stationCount stations. ≈ prices are the chain's typical price today, not this station's. Reported prices may be out of date; check the pump. Driver prices updated $updated, chain prices $chains.",
+                "$stationCount stasjoner. ≈-priser er kjedens typiske pris i dag, ikke stasjonens egen. Meldte priser kan være utdatert; sjekk pumpa. Bilistpriser hentet $updated, kjedepriser $chains."),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            tr(no, "Data: Drivstoffpriser (ODbL) · © OpenStreetMap contributors", "Data: Drivstoffpriser (ODbL) · © OpenStreetMap-bidragsytere") +
+            tr(no, "Data: Drivstoffpriser (ODbL) · © OpenStreetMap contributors · chain prices: DrivstoffAppen",
+                "Data: Drivstoffpriser (ODbL) · © OpenStreetMap-bidragsytere · kjedepriser: DrivstoffAppen") +
                 " · v${BuildConfig.VERSION_NAME}",
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,

@@ -114,12 +114,13 @@ fun StationSheet(
                                 PriceSource.ME -> tr(no, "Your price · ", "Din pris · ")
                                 PriceSource.COMMUNITY -> if (p.reports > 1)
                                     tr(no, "${p.reports} reports · ", "${p.reports} meldinger · ") else ""
+                                PriceSource.CHAIN -> ""
                             }
-                            AgeLabel(p.updatedAt, now, no, prefix = who)
+                            PriceNote(p, now, no, prefix = who)
                         }
                     }
                     if (p != null) {
-                        Text("${Format.price(p.price, no)} kr", style = MaterialTheme.typography.titleLarge.merge(Tabular),
+                        Text("${priceText(p, no)} kr", style = MaterialTheme.typography.titleLarge.merge(Tabular),
                             fontWeight = FontWeight.Bold)
                         if (p.source == PriceSource.ME) {
                             IconButton(onClick = { onRemove(f) }) {

@@ -25,7 +25,12 @@ data class Station(
     val lng: Double,
 )
 
-enum class PriceSource { COMMUNITY, ME }
+enum class PriceSource {
+    COMMUNITY,
+    ME,
+    /** The chain's typical price today, not measured at this station. */
+    CHAIN,
+}
 
 /** One known price for one fuel at one station. */
 data class FuelPrice(
@@ -34,7 +39,14 @@ data class FuelPrice(
     val updatedAt: Long?,
     val reports: Int,
     val source: PriceSource,
-)
+    /** For [PriceSource.CHAIN]: the chain the price belongs to, e.g. "Circle K Automat". */
+    val label: String? = null,
+) {
+    val isEstimate get() = source == PriceSource.CHAIN
+}
+
+/** Today's typical price for one chain (or chain variant, like "Circle K Automat"). */
+data class ChainPrice(val name: String, val prices: Map<FuelType, Double>)
 
 /** Station id -> fuel -> newest known price. */
 typealias PriceBook = Map<String, Map<FuelType, FuelPrice>>

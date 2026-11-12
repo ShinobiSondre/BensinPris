@@ -150,4 +150,48 @@ class FuelTest {
         assertEquals(Freshness.RECENT, Format.freshness(now - 5 * Format.DAY, now))
         assertEquals(Freshness.OLD, Format.freshness(now - 30 * Format.DAY, now))
     }
+
+    // ---- typical chain prices ----
+
+    private val chainHtml = """
+        <table class="w-full"><caption class="px-4">Kjedene i dag</caption><thead><tr class="b"><th scope="col">Kjede</th>
+        <th scope="col" class="r">Bensin 95</th><th scope="col" class="r">Diesel</th></tr></thead><tbody class="tabular-nums">
+        <tr class="b"><th scope="row" class="x"><a class="u" href="/drivstoffpriser/automat-1">Automat 1</a></th><td class="r"><span class="font-bold text-ink">21,07</span></td><td class="r"><span class="font-bold">25,05</span></td></tr>
+        <tr class="b"><th scope="row"><a href="/drivstoffpriser/uno-x">Uno-X</a></th><td><span>22,31</span></td><td><span>25,39</span></td></tr>
+        <tr class="b"><th scope="row"><a href="/drivstoffpriser/circle-k">Circle K Automat</a></th><td><span>22,62</span></td><td><span>25,77</span></td></tr>
+        <tr class="b"><th scope="row"><a href="/drivstoffpriser/circle-k">Circle K</a></th><td><span>22,69</span></td><td><span>25,94</span></td></tr>
+        <tr class="b"><th scope="row"><a href="/drivstoffpriser/st1">ST1</a></th><td><span>22,79</span></td><td><span>–</span></td></tr>
+        </tbody></table>
+    """.trimIndent()
+
+    @Test fun parses_chain_table() {
+        val c = Parse.chainPrices(chainHtml)
+        assertEquals(listOf("Automat 1", "Uno-X", "Circle K Automat", "Circle K", "ST1"), c.map { it.name })
+        assertEquals(21.07, c[0].prices[FuelType.PETROL95]!!, 0.0)
+        assertEquals(25.05, c[0].prices[FuelType.DIESEL]!!, 0.0)
+        assertNull(c[4].prices[FuelType.DIESEL])
+    }
+
+    @Test fun matches_stations_to_chains_and_variants() {
+        val c = Parse.chainPrices(chainHtml)
+        fun s(brand: String, name: String) = Station("x", name, brand, "", "", 59.0, 10.0)
+        assertEquals("Uno-X", Parse.chainFor(s("Uno-X", "Uno-X Rafnes"), c)?.name)
+        assertEquals("Circle K Automat", Parse.chainFor(s("Circle K", "Circle K Automat Pors"), c)?.name)
+        assertEquals("Circle K", Parse.chainFor(s("Circle K", "Circle K E18 Grelland"), c)?.name)
+        assertEquals("Automat 1", Parse.chainFor(s("Automat1", "Automat1 Skien"), c)?.name)
+        assertEquals("ST1", Parse.chainFor(s("St1", "St1 Pors"), c)?.name)
+        assertNull(Parse.chainFor(s("Esso", "Esso Brua"), c))
+        assertNull(Parse.chainFor(s("Uno-X", ""), emptyList()))
+    }
+
+    @Test fun recent_station_price_beats_chain_estimate_but_old_one_does_not() {
+        val now = 1_000L * Format.DAY
+        val chain = mapOf("osm_1" to mapOf(FuelType.PETROL95 to FuelPrice(22.31, now, 0, PriceSource.CHAIN, "Uno-X")))
+        val yesterday = mapOf("osm_1" to mapOf(FuelType.PETROL95 to p(21.5, now - Format.DAY, PriceSource.ME)))
+        val months = mapOf("osm_1" to mapOf(FuelType.PETROL95 to p(17.99, now - 180 * Format.DAY)))
+        assertEquals(21.5, Parse.merge(chain, yesterday)["osm_1"]!![FuelType.PETROL95]!!.price, 0.0)
+        val m = Parse.merge(chain, months)["osm_1"]!![FuelType.PETROL95]!!
+        assertTrue(m.isEstimate)
+        assertEquals(22.31, m.price, 0.0)
+    }
 }

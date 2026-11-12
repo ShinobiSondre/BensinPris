@@ -39,6 +39,46 @@ class CachedFeed(private val name: String, private val url: String, private val 
     }
 }
 
+/**
+ * Typical price per chain today, read from DrivstoffAppen's public price page (robots.txt allows it).
+ * Kept on the phone as parsed JSON and fetched again after 6 hours.
+ */
+object ChainStore {
+    private const val URL = "https://drivstoffappen.no/drivstoffpriser"
+    private const val MAX_AGE = 6 * Format.HOUR
+    private fun file(ctx: Context) = File(ctx.filesDir, "chains.json")
+
+    data class Snapshot(val chains: List<ChainPrice>, val at: Long)
+
+    fun read(ctx: Context): Snapshot = runCatching {
+        val o = JSONObject(file(ctx).readText())
+        val arr = o.getJSONArray("chains")
+        val list = (0 until arr.length()).map { i ->
+            val c = arr.getJSONObject(i)
+            val p = c.getJSONObject("prices")
+            ChainPrice(c.getString("name"), p.keys().asSequence().mapNotNull { k ->
+                FuelType.fromKey(k)?.let { it to p.getDouble(k) }
+            }.toMap())
+        }
+        Snapshot(list, o.getLong("at"))
+    }.getOrDefault(Snapshot(emptyList(), 0L))
+
+    fun isStale(ctx: Context) = System.currentTimeMillis() - read(ctx).at > MAX_AGE
+
+    suspend fun download(ctx: Context): Snapshot {
+        val chains = Parse.chainPrices(Http.get(URL, timeoutMs = 20_000, accept = "text/html"))
+        require(chains.size >= 3) { "Chain table not found" }
+        val now = System.currentTimeMillis()
+        val arr = JSONArray()
+        chains.forEach { c ->
+            val p = JSONObject(); c.prices.forEach { (f, v) -> p.put(f.key, v) }
+            arr.put(JSONObject().put("name", c.name).put("prices", p))
+        }
+        file(ctx).writeText(JSONObject().put("at", now).put("chains", arr).toString())
+        return Snapshot(chains, now)
+    }
+}
+
 /** Prices you typed in yourself, kept only on this phone. */
 object MyPrices {
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("my_prices", Context.MODE_PRIVATE)

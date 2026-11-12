@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bensinpris.app.data.Format
+import com.bensinpris.app.data.FuelPrice
 import com.bensinpris.app.data.Freshness
 import java.util.Locale
 
@@ -89,4 +90,22 @@ fun Tag(text: String, bg: Color, fg: Color) {
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(bg).padding(horizontal = 7.dp, vertical = 3.dp),
     )
+}
+
+/** "17,99", or "≈ 22,31" for a chain's typical price. */
+fun priceText(p: FuelPrice, no: Boolean): String = (if (p.isEstimate) "≈ " else "") + Format.price(p.price, no)
+
+/** Under a price: how old it is, or that it is the chain's typical price today. */
+@Composable
+fun PriceNote(p: FuelPrice, now: Long, no: Boolean, color: Color? = null, prefix: String = "") {
+    if (p.isEstimate) {
+        Text(
+            prefix + (if (no) "Typisk ${p.label} i dag" else "Typical ${p.label} today"),
+            style = MaterialTheme.typography.labelMedium,
+            color = color ?: MaterialTheme.colorScheme.onSurfaceVariant,
+            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+        )
+    } else {
+        AgeLabel(p.updatedAt, now, no, color, prefix)
+    }
 }
