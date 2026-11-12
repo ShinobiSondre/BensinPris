@@ -9,6 +9,7 @@ import com.bensinpris.app.data.PriceSource
 import com.bensinpris.app.data.Rank
 import com.bensinpris.app.data.SortBy
 import com.bensinpris.app.data.Station
+import com.bensinpris.app.data.WebStation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -193,5 +194,63 @@ class FuelTest {
         val m = Parse.merge(chain, months)["osm_1"]!![FuelType.PETROL95]!!
         assertTrue(m.isEstimate)
         assertEquals(22.31, m.price, 0.0)
+    }
+
+    // ---- station prices from drivstoffapp.no ----
+
+    private val webHtml = """
+        <html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"ItemList","name":"Bensinstasjoner i Skien","itemListElement":[
+          {"@type":"ListItem","position":1,"item":{"@type":"GasStation","name":"Telemarksveien","brand":{"@type":"Brand","name":"Circle K Automat"},
+            "geo":{"@type":"GeoCoordinates","latitude":59.18642825796747,"longitude":9.605065337614588},
+            "hasOfferCatalog":{"@type":"OfferCatalog","itemListElement":[{"@type":"Offer","name":"Diesel","price":"25.5"},{"@type":"Offer","name":"Bensin 95","price":"22.4"}]}}},
+          {"@type":"ListItem","position":2,"item":{"@type":"GasStation","name":"Esso Skien",
+            "geo":{"@type":"GeoCoordinates","latitude":59.26655709134209,"longitude":9.531404238879551},
+            "hasOfferCatalog":{"@type":"OfferCatalog","itemListElement":[{"@type":"Offer","name":"Diesel","price":"19.68"},{"@type":"Offer","name":"Bensin 95","price":"22.68"},{"@type":"Offer","name":"98 Oktan","price":"20.18"},{"@type":"Offer","name":"FD Diesel","price":"21.24"}]}}}
+        ]}</script>
+        <script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Hjem"}]}</script></head></html>
+    """.trimIndent()
+
+    @Test fun parses_website_station_list() {
+        val w = Parse.webStations(webHtml)
+        assertEquals(2, w.size)
+        assertEquals("Telemarksveien", w[0].name)
+        assertEquals(25.5, w[0].prices[FuelType.DIESEL]!!, 0.0)
+        assertEquals(20.18, w[1].prices[FuelType.PETROL98]!!, 0.0)
+        assertEquals(3, w[1].prices.size) // "FD Diesel" is not one of ours
+    }
+
+    @Test fun website_prices_match_by_position_and_drop_implausible_ones() {
+        val chains = Parse.chainPrices(chainHtml)
+        val ours = listOf(
+            Station("osm_ck", "Circle K Automat Telemarksveien", "Circle K", "", "Skien", 59.1865, 9.6051), // ~10 m away
+            Station("osm_esso", "Esso Skien", "Esso", "", "Skien", 59.26655, 9.53140),
+            Station("osm_far", "Uno-X Far", "Uno-X", "", "Skien", 59.30, 9.60),
+        )
+        val book = Parse.matchWeb(ours, Parse.webStations(webHtml), chains, 1_000L)
+        assertEquals(setOf("osm_ck", "osm_esso"), book.keys)
+        assertEquals(22.4, book["osm_ck"]!![FuelType.PETROL95]!!.price, 0.0)
+        assertEquals(PriceSource.WEB, book["osm_ck"]!![FuelType.PETROL95]!!.source)
+        // Esso isn't in the chain table, so the national middle is the yardstick: diesel 19.68 is far too low.
+        assertNull(book["osm_esso"]!![FuelType.DIESEL])
+        assertEquals(22.68, book["osm_esso"]!![FuelType.PETROL95]!!.price, 0.0)
+        // 98 cheaper than 95 can't be right.
+        assertNull(book["osm_esso"]!![FuelType.PETROL98])
+    }
+
+    @Test fun website_price_beats_chain_estimate_and_old_report() {
+        val now = 1_000L * Format.DAY
+        val chain = mapOf("x" to mapOf(FuelType.PETROL95 to FuelPrice(22.3, now, 0, PriceSource.CHAIN, "Uno-X")))
+        val web = mapOf("x" to mapOf(FuelType.PETROL95 to FuelPrice(21.9, now, 0, PriceSource.WEB, "drivstoffapp.no")))
+        val old = mapOf("x" to mapOf(FuelType.PETROL95 to p(17.99, now - 180 * Format.DAY)))
+        assertEquals(21.9, Parse.merge(chain, web, old)["x"]!![FuelType.PETROL95]!!.price, 0.0)
+    }
+
+    @Test fun nearby_towns_closest_first() {
+        val spots = listOf(
+            com.bensinpris.app.data.Spot(Station("a", "", "", "", "Porsgrunn", 0.0, 0.0), 500.0, null, emptyMap()),
+            com.bensinpris.app.data.Spot(Station("b", "", "", "", "Skien", 0.0, 0.0), 300.0, null, emptyMap()),
+            com.bensinpris.app.data.Spot(Station("c", "", "", "", "skien", 0.0, 0.0), 900.0, null, emptyMap()),
+        )
+        assertEquals(listOf("Skien", "Porsgrunn"), Parse.nearbyTowns(spots))
     }
 }

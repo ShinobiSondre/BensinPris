@@ -105,6 +105,12 @@ fun PriceNote(p: FuelPrice, now: Long, no: Boolean, color: Color? = null, prefix
             color = color ?: MaterialTheme.colorScheme.onSurfaceVariant,
             fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
         )
+    } else if (p.source == com.bensinpris.app.data.PriceSource.WEB) {
+        Text(
+            prefix + (if (no) "Fra ${p.label}" else "From ${p.label}"),
+            style = MaterialTheme.typography.labelMedium,
+            color = color ?: MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     } else {
         AgeLabel(p.updatedAt, now, no, color, prefix)
     }

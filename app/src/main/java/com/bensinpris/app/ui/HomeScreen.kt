@@ -268,7 +268,7 @@ private fun HeroCard(
             prefix = when (price.source) {
                 PriceSource.ME -> tr(no, "Your price · ", "Din pris · ")
                 PriceSource.COMMUNITY -> tr(no, "Reported ", "Meldt ")
-                PriceSource.CHAIN -> ""
+                PriceSource.CHAIN, PriceSource.WEB -> ""
             },
         )
         if (price.isEstimate) {
@@ -434,8 +434,8 @@ private fun Footer(pricesAt: Long, chainsAt: Long, stationCount: Int, no: Boolea
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            tr(no, "Data: Drivstoffpriser (ODbL) · © OpenStreetMap contributors · chain prices: DrivstoffAppen",
-                "Data: Drivstoffpriser (ODbL) · © OpenStreetMap-bidragsytere · kjedepriser: DrivstoffAppen") +
+            tr(no, "Data: Drivstoffpriser (ODbL) · © OpenStreetMap contributors · chain prices: DrivstoffAppen · station prices: drivstoffapp.no",
+                "Data: Drivstoffpriser (ODbL) · © OpenStreetMap-bidragsytere · kjedepriser: DrivstoffAppen · stasjonspriser: drivstoffapp.no") +
                 " · v${BuildConfig.VERSION_NAME}",
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,

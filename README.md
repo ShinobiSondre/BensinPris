@@ -15,7 +15,13 @@ Finds the cheapest fuel near you in Norway. Norwegian and English.
 | --- | --- | --- |
 | Stations (name, chain, address, position) | [Drivstoffpriser open data](https://drivstoffpriser.github.io/Drivstoffpriser-App/data/index.html), based on OpenStreetMap | ODbL |
 | Prices reported by drivers | Same open data, `prices.json` | ODbL |
+| Station prices | [drivstoffapp.no](https://www.drivstoffapp.no) town pages (schema.org data; robots.txt allows `/search`), only for towns near you, cached 3 h | Public web page |
+| Typical price per chain today (shown with ≈) | [DrivstoffAppen](https://drivstoffappen.no/drivstoffpriser) public price page (robots.txt allows all), cached 6 h | Public web page |
 | Prices you enter | Your phone | — |
+
+Which price wins for a station and fuel: newest first, where a website price counts as one day old and a chain estimate as two days old. So your own price or a fresh report beats the website, the website beats the chain estimate, and today's chain estimate beats a report from months ago. Website prices more than 15 % from the chain's typical price, and 98 cheaper than 95, are dropped as likely errors.
+
+Not used: Google Maps and Google Search pages (scraping them breaks Google's terms). Google's Places API has station fuel prices and could be added with your own API key.
 
 As of November 2026 the open price export holds about 200 prices, the newest from May 2026: Drivstoffpriser's own app now keeps live prices on a private server. No Norwegian chain publishes per-station prices openly (Denmark requires it by law; Norway does not), so fresher prices need a new source. `PriceBook` merging in `Parse.merge` takes any number of sources, newest price wins.
 

@@ -30,6 +30,8 @@ enum class PriceSource {
     ME,
     /** The chain's typical price today, not measured at this station. */
     CHAIN,
+    /** A station price published on a public website (drivstoffapp.no); no report time is given. */
+    WEB,
 }
 
 /** One known price for one fuel at one station. */
@@ -44,6 +46,9 @@ data class FuelPrice(
 ) {
     val isEstimate get() = source == PriceSource.CHAIN
 }
+
+/** A station with prices as listed on a public price website. */
+data class WebStation(val name: String, val lat: Double, val lng: Double, val prices: Map<FuelType, Double>)
 
 /** Today's typical price for one chain (or chain variant, like "Circle K Automat"). */
 data class ChainPrice(val name: String, val prices: Map<FuelType, Double>)

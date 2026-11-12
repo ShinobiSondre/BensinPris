@@ -10,6 +10,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.bensinpris.app.data.CachedFeed
 import com.bensinpris.app.data.ChainStore
+import com.bensinpris.app.data.WebStore
 import com.bensinpris.app.data.FuelType
 import com.bensinpris.app.data.MyPrices
 import com.bensinpris.app.data.Parse
@@ -67,6 +68,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var community: PriceBook = emptyMap()
     private var mine: PriceBook = emptyMap()
     private var chains: ChainStore.Snapshot = ChainStore.Snapshot(emptyList(), 0L)
+    /** Website prices per town, for the towns around you. */
+    private val web = HashMap<String, WebStore.Town>()
+    private var webJob: kotlinx.coroutines.Job? = null
     private var book: PriceBook = emptyMap()
 
     init {
@@ -114,11 +118,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (force) locate()
             rebuild()
             _state.update { it.copy(refreshing = false, offline = failed) }
+            loadTowns(force)
         }
     }
 
     private fun rebuild() {
-        book = Parse.merge(Parse.estimates(stations, chains.chains, chains.at), community, mine)
+        val webBook = Parse.merge(*web.values.map { t -> Parse.matchWeb(stations, t.stations, chains.chains, t.at) }.toTypedArray())
+        book = Parse.merge(Parse.estimates(stations, chains.chains, chains.at), webBook, community, mine)
         _state.update {
             it.copy(stationCount = stations.size, pricesFetchedAt = CachedFeed.PRICES.fetchedAt(ctx), chainsFetchedAt = chains.at)
         }
@@ -130,6 +136,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val here = s.here ?: return
         val spots = Rank.spots(stations, book, s.fuel, here.lat, here.lng, s.radiusKm * 1000.0, s.sort)
         _state.update { it.copy(spots = spots, summary = Rank.summary(spots)) }
+    }
+
+    /** Station prices from the price website for the towns around you (cached 3 hours per town). */
+    private fun loadTowns(force: Boolean) {
+        val towns = Parse.nearbyTowns(_state.value.spots)
+        if (towns.isEmpty()) return
+        webJob?.cancel()
+        webJob = viewModelScope.launch {
+            var changed = false
+            for (town in towns) {
+                val key = town.lowercase()
+                val cached = withContext(Dispatchers.IO) { WebStore.read(ctx, town) }
+                if (cached != null && web[key] == null) { web[key] = cached; changed = true }
+                if (force || withContext(Dispatchers.IO) { WebStore.isStale(ctx, town) }) {
+                    withContext(Dispatchers.IO) { runCatching { WebStore.download(ctx, town) }.getOrNull() }
+                        ?.let { web[key] = it; changed = true }
+                }
+            }
+            if (changed) rebuild()
+        }
     }
 
     // ---- location ----
@@ -151,6 +177,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun useOslo() {
         _state.update { it.copy(needsPermission = false, locating = false, here = Here(OSLO_LAT, OSLO_LNG, true), place = "Oslo sentrum") }
         recompute()
+        loadTowns(false)
     }
 
     @SuppressLint("MissingPermission")
@@ -173,6 +200,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun setHere(lat: Double, lng: Double) {
         _state.update { it.copy(here = Here(lat, lng, false)) }
         recompute()
+        loadTowns(force = false)
         val place = withContext(Dispatchers.IO) { placeName(lat, lng) }
         if (place != null) _state.update { it.copy(place = place) }
     }
@@ -187,7 +215,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---- choices ----
 
     fun setFuel(f: FuelType) { Prefs.setFuel(ctx, f); _state.update { it.copy(fuel = f) }; recompute() }
-    fun setRadius(km: Int) { Prefs.setRadiusKm(ctx, km); _state.update { it.copy(radiusKm = km) }; recompute() }
+    fun setRadius(km: Int) { Prefs.setRadiusKm(ctx, km); _state.update { it.copy(radiusKm = km) }; recompute(); loadTowns(false) }
     fun setSort(s: SortBy) { Prefs.setSort(ctx, s); _state.update { it.copy(sort = s) }; recompute() }
 
     fun select(id: String?) = _state.update { it.copy(selectedId = id) }

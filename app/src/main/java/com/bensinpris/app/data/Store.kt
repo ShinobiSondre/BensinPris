@@ -79,6 +79,44 @@ object ChainStore {
     }
 }
 
+/**
+ * Station prices from drivstoffapp.no town pages (robots.txt allows /search). One small file per town,
+ * fetched again after 3 hours, and only for the few towns around you.
+ */
+object WebStore {
+    private const val MAX_AGE = 3 * Format.HOUR
+    private fun file(ctx: Context, town: String) =
+        File(ctx.filesDir, "web_" + town.lowercase().filter { it.isLetterOrDigit() } + ".json")
+
+    data class Town(val stations: List<WebStation>, val at: Long)
+
+    fun read(ctx: Context, town: String): Town? = runCatching {
+        val o = JSONObject(file(ctx, town).readText())
+        val arr = o.getJSONArray("s")
+        Town((0 until arr.length()).map { i ->
+            val w = arr.getJSONObject(i)
+            val p = w.getJSONObject("p")
+            WebStation(w.getString("n"), w.getDouble("a"), w.getDouble("o"),
+                p.keys().asSequence().mapNotNull { k -> FuelType.fromKey(k)?.let { it to p.getDouble(k) } }.toMap())
+        }, o.getLong("at"))
+    }.getOrNull()
+
+    fun isStale(ctx: Context, town: String) = System.currentTimeMillis() - (read(ctx, town)?.at ?: 0L) > MAX_AGE
+
+    suspend fun download(ctx: Context, town: String): Town {
+        val slug = java.net.URLEncoder.encode(town.lowercase(), "UTF-8").replace("+", "%20")
+        val list = Parse.webStations(Http.get("https://www.drivstoffapp.no/search/$slug", timeoutMs = 20_000, accept = "text/html"))
+        val now = System.currentTimeMillis()
+        val arr = JSONArray()
+        list.forEach { w ->
+            val p = JSONObject(); w.prices.forEach { (f, v) -> p.put(f.key, v) }
+            arr.put(JSONObject().put("n", w.name).put("a", w.lat).put("o", w.lng).put("p", p))
+        }
+        file(ctx, town).writeText(JSONObject().put("at", now).put("s", arr).toString())
+        return Town(list, now)
+    }
+}
+
 /** Prices you typed in yourself, kept only on this phone. */
 object MyPrices {
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("my_prices", Context.MODE_PRIVATE)

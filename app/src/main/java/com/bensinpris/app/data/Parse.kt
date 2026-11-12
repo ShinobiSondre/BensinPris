@@ -83,10 +83,94 @@ object Parse {
 
     private fun effective(p: FuelPrice): Long {
         val t = p.updatedAt ?: return Long.MIN_VALUE
-        return if (p.isEstimate) t - 2 * Format.DAY else t
+        return when (p.source) {
+            PriceSource.CHAIN -> t - 2 * Format.DAY
+            // Website prices carry no report time, so they count as a day old when fetched.
+            PriceSource.WEB -> t - Format.DAY
+            else -> t
+        }
     }
 
-    private fun rank(p: FuelPrice) = when (p.source) { PriceSource.ME -> 2; PriceSource.COMMUNITY -> 1; PriceSource.CHAIN -> 0 }
+    private fun rank(p: FuelPrice) = when (p.source) {
+        PriceSource.ME -> 3; PriceSource.COMMUNITY -> 2; PriceSource.WEB -> 1; PriceSource.CHAIN -> 0
+    }
+
+    // ---------- station prices from drivstoffapp.no (schema.org GasStation data on each town page) ----------
+
+    fun webStations(html: String): List<WebStation> {
+        val out = ArrayList<WebStation>()
+        Regex("<script[^>]*application/ld\\+json[^>]*>(.*?)</script>", RegexOption.DOT_MATCHES_ALL).findAll(html).forEach { m ->
+            val root = runCatching { JSONObject(m.groupValues[1]) }.getOrNull() ?: return@forEach
+            val items = root.optJSONArray("itemListElement") ?: return@forEach
+            for (i in 0 until items.length()) {
+                val st = items.optJSONObject(i)?.optJSONObject("item") ?: continue
+                if (st.optString("@type") != "GasStation") continue
+                val geo = st.optJSONObject("geo") ?: continue
+                val lat = geo.optDouble("latitude", Double.NaN)
+                val lng = geo.optDouble("longitude", Double.NaN)
+                if (lat.isNaN() || lng.isNaN()) continue
+                val offers = st.optJSONObject("hasOfferCatalog")?.optJSONArray("itemListElement") ?: continue
+                val prices = HashMap<FuelType, Double>()
+                for (j in 0 until offers.length()) {
+                    val o = offers.optJSONObject(j) ?: continue
+                    val fuel = webFuel(o.optString("name")) ?: continue
+                    val v = o.optString("price").replace(',', '.').toDoubleOrNull() ?: continue
+                    if (plausible(v)) prices[fuel] = v
+                }
+                if (prices.isNotEmpty()) out += WebStation(st.optString("name"), lat, lng, prices)
+            }
+        }
+        return out
+    }
+
+    private fun webFuel(name: String): FuelType? {
+        val n = name.lowercase().trim()
+        return when {
+            n == "diesel" -> FuelType.DIESEL
+            n.contains("95") -> FuelType.PETROL95
+            n.contains("98") -> FuelType.PETROL98
+            else -> null
+        }
+    }
+
+    /**
+     * Puts website prices on our stations (nearest within [maxM]). Prices that look wrong are dropped:
+     * more than [maxOff] away from the chain's typical price (or from the national middle, if the chain
+     * isn't listed), or 98 cheaper than 95 at the same station.
+     */
+    fun matchWeb(
+        stations: List<Station>, web: List<WebStation>, chains: List<ChainPrice>, at: Long,
+        maxM: Double = 150.0, maxOff: Double = 0.15,
+    ): PriceBook {
+        val national = FuelType.entries.associateWith { f ->
+            chains.mapNotNull { it.prices[f] }.sorted().let { if (it.isEmpty()) null else it[it.size / 2] }
+        }
+        val out = HashMap<String, Map<FuelType, FuelPrice>>()
+        for (w in web) {
+            val dLat = maxM / 111_000.0
+            val st = stations.asSequence()
+                .filter { kotlin.math.abs(it.lat - w.lat) < dLat * 2 && kotlin.math.abs(it.lng - w.lng) < dLat * 4 }
+                .map { it to Rank.distanceM(w.lat, w.lng, it.lat, it.lng) }
+                .filter { it.second <= maxM }
+                .minByOrNull { it.second }?.first ?: continue
+            val chain = chainFor(st, chains)
+            val ok = w.prices.filter { (fuel, v) ->
+                val ref = chain?.prices?.get(fuel) ?: national[fuel]
+                ref == null || kotlin.math.abs(v - ref) / ref <= maxOff
+            }.toMutableMap()
+            val p95 = ok[FuelType.PETROL95]
+            val p98 = ok[FuelType.PETROL98]
+            if (p95 != null && p98 != null && p98 < p95) ok.remove(FuelType.PETROL98)
+            if (ok.isEmpty()) continue
+            out[st.id] = ok.mapValues { (_, v) -> FuelPrice(v, at, 0, PriceSource.WEB, "drivstoffapp.no") }
+        }
+        return out
+    }
+
+    /** Town names to look up on the price website: the towns of the nearest stations, closest first. */
+    fun nearbyTowns(spots: List<Spot>, max: Int = 6): List<String> =
+        spots.sortedBy { it.distanceM }.map { it.station.city.trim() }.filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }.take(max)
 
     // ---------- typical chain prices (drivstoffappen.no/drivstoffpriser, table "Kjedene i dag") ----------
 
