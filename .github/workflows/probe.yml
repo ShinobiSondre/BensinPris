@@ -1,0 +1,30 @@
+name: Probe data sources
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        run: |
+          set +e
+          curl -sS -m 30 https://www.drivstoffapp.no/robots.txt | head -40 | sed 's/^/ROBOTS /'
+          for u in https://www.drivstoffapp.no/terms https://www.drivstoffapp.no/vilkar https://www.drivstoffapp.no/en/terms; do echo "TERMS $u $(curl -s -o /dev/null -w '%{http_code}' -m 20 $u)"; done
+          code=$(curl -sS -m 40 -L -o skien.html -w '%{http_code}' https://www.drivstoffapp.no/search/skien); echo "PAGE skien $code $(wc -c < skien.html)"
+          code=$(curl -sS -m 40 -L -o pors.html -w '%{http_code}' https://www.drivstoffapp.no/search/porsgrunn); echo "PAGE porsgrunn $code $(wc -c < pors.html)"
+          curl -sS -m 40 -L https://www.drivstoffapp.no/sitemap.xml | head -c 1500 | sed 's/^/SITEMAP /'; echo
+          python3 - <<'PY'
+          import re, json
+          h = open("skien.html", encoding="utf-8", errors="replace").read()
+          blocks = re.findall(r'<script[^>]*application/ld\+json[^>]*>(.*?)</script>', h, re.S)
+          print("LDCOUNT", len(blocks))
+          for b in blocks:
+              print("LD", b[:2500].replace("\n"," "))
+          for kw in ["latitude", "geo", "address", "updatedAt", "lastUpdated", "__NEXT_DATA__", "self.__next_f", "<table"]:
+              print("COUNT", kw, h.count(kw))
+          i = h.find("<table"); print("TABLE", h[i:i+2500].replace("\n"," ") if i>=0 else "none")
+          m = re.search(r'latitude.{0,200}', h); print("LATCTX", m.group(0) if m else "none")
+          PY
+          curl -sS -m 30 https://tankstatus.azurewebsites.net/robots.txt | head -5 | sed 's/^/TSROBOTS /'
