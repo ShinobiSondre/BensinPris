@@ -1,0 +1,92 @@
+package com.bensinpris.app.data
+
+import android.content.Context
+import com.bensinpris.app.util.Http
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+
+/**
+ * A JSON feed kept on the phone. Reads the last download, or the copy bundled into the APK at
+ * build time, so the app has stations to show even offline on first start.
+ */
+class CachedFeed(private val name: String, private val url: String, private val maxAgeMs: Long) {
+    private fun file(ctx: Context) = File(ctx.filesDir, name)
+
+    /** When the phone's copy was downloaded (0 if only the bundled copy exists). */
+    fun fetchedAt(ctx: Context): Long = file(ctx).takeIf { it.exists() }?.lastModified() ?: 0L
+
+    fun isStale(ctx: Context) = System.currentTimeMillis() - fetchedAt(ctx) > maxAgeMs
+
+    fun read(ctx: Context): String? =
+        runCatching { file(ctx).takeIf { it.exists() }?.readText() }.getOrNull()
+            ?: runCatching { ctx.assets.open(name).bufferedReader().use { it.readText() } }.getOrNull()
+
+    /** Downloads the feed and keeps it only if [valid] accepts it. */
+    suspend fun download(ctx: Context, valid: (String) -> Boolean): String {
+        val text = Http.get(url, timeoutMs = 30_000)
+        require(valid(text)) { "Unexpected data from $url" }
+        val tmp = File(ctx.filesDir, "$name.tmp")
+        tmp.writeText(text)
+        tmp.renameTo(file(ctx))
+        return text
+    }
+
+    companion object {
+        private const val BASE = "https://drivstoffpriser.github.io/Drivstoffpriser-App/data"
+        val STATIONS = CachedFeed("stations.json", "$BASE/stations.json", Format.DAY)
+        val PRICES = CachedFeed("prices.json", "$BASE/prices.json", 3 * Format.HOUR)
+    }
+}
+
+/** Prices you typed in yourself, kept only on this phone. */
+object MyPrices {
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("my_prices", Context.MODE_PRIVATE)
+
+    fun load(ctx: Context): PriceBook {
+        val arr = runCatching { JSONArray(prefs(ctx).getString("all", "[]")) }.getOrDefault(JSONArray())
+        val book = HashMap<String, HashMap<FuelType, FuelPrice>>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val fuel = FuelType.fromKey(o.optString("fuel")) ?: continue
+            book.getOrPut(o.optString("station")) { HashMap() }[fuel] =
+                FuelPrice(o.optDouble("price"), o.optLong("at"), 1, PriceSource.ME)
+        }
+        return book
+    }
+
+    fun put(ctx: Context, stationId: String, fuel: FuelType, price: Double) =
+        save(ctx, entries(ctx).filterNot { it.first == stationId && it.second == fuel } +
+            Entry(stationId, fuel, price, System.currentTimeMillis()))
+
+    fun remove(ctx: Context, stationId: String, fuel: FuelType) =
+        save(ctx, entries(ctx).filterNot { it.first == stationId && it.second == fuel })
+
+    private data class Entry(val first: String, val second: FuelType, val price: Double, val at: Long)
+
+    private fun entries(ctx: Context): List<Entry> = load(ctx).flatMap { (id, fuels) ->
+        fuels.map { (f, p) -> Entry(id, f, p.price, p.updatedAt ?: 0L) }
+    }
+
+    private fun save(ctx: Context, list: List<Entry>) {
+        val arr = JSONArray()
+        list.forEach {
+            arr.put(JSONObject().put("station", it.first).put("fuel", it.second.key).put("price", it.price).put("at", it.at))
+        }
+        prefs(ctx).edit().putString("all", arr.toString()).apply()
+    }
+}
+
+/** Choices remembered between launches. */
+object Prefs {
+    private fun p(ctx: Context) = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+    fun fuel(ctx: Context) = FuelType.fromKey(p(ctx).getString("fuel", null)) ?: FuelType.PETROL95
+    fun setFuel(ctx: Context, f: FuelType) = p(ctx).edit().putString("fuel", f.key).apply()
+
+    fun radiusKm(ctx: Context) = p(ctx).getInt("radius", 10)
+    fun setRadiusKm(ctx: Context, km: Int) = p(ctx).edit().putInt("radius", km).apply()
+
+    fun sort(ctx: Context) = runCatching { SortBy.valueOf(p(ctx).getString("sort", "PRICE")!!) }.getOrDefault(SortBy.PRICE)
+    fun setSort(ctx: Context, s: SortBy) = p(ctx).edit().putString("sort", s.name).apply()
+}

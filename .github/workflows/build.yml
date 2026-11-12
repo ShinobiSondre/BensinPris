@@ -3,7 +3,7 @@ name: Build APK
 on:
   push:
     branches: [ main ]
-    paths-ignore: [ "README.md", ".github/workflows/probe.yml" ]
+    paths-ignore: [ "README.md" ]
   workflow_dispatch:
 
 permissions:
@@ -28,8 +28,29 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
+      # A fresh copy of all stations and prices goes into the APK, so the app works offline from the first start.
+      - name: Bundle station and price data
+        run: |
+          mkdir -p app/src/main/assets
+          B=https://drivstoffpriser.github.io/Drivstoffpriser-App/data
+          for f in stations prices; do
+            if curl -fsS -m 60 -o app/src/main/assets/$f.json $B/$f.json; then
+              echo "::notice title=Bundled $f::$(wc -c < app/src/main/assets/$f.json) bytes"
+            else
+              echo "::warning title=Bundle failed::$f.json could not be downloaded; the app will fetch it on first start"
+              rm -f app/src/main/assets/$f.json
+            fi
+          done
+
       - name: Test and build release APK
-        run: gradle :app:testReleaseUnitTest :app:assembleRelease --no-daemon
+        run: |
+          set +e
+          gradle :app:testReleaseUnitTest :app:assembleRelease --no-daemon 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            grep -E "^e: |What went wrong|Could not (resolve|find)|FAILED|AssertionError|expected:" -A2 build.log | head -40 | while IFS= read -r line; do echo "::error::$line"; done
+          fi
+          exit $status
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk BensinPris-v1.0.${{ github.run_number }}.apk

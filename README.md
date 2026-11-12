@@ -1,16 +1,29 @@
 # BensinPris
 
-Finds the cheapest fuel near you in Norway, in Norwegian and English.
+Finds the cheapest fuel near you in Norway. Norwegian and English.
 
-- **Cheapest first.** Stations within 5, 10 or 25 km, sorted by price for Bensin 95, Bensin 98 or Diesel. Stations with no price are listed last.
-- **Several sources.** Station locations come from OpenStreetMap (Overpass API, free, no key). Prices come from community reports published as open data by drivstoffpriser (refreshed every 12 hours, free to use). Each price is matched to the nearest station within 60 m.
-- **Updates itself.** The app checks GitHub Releases for a newer build when it opens, when it comes back to the front, and every 10 minutes while open, then installs it.
-- **Open in Google Maps.** Each station has a button that starts driving directions to it.
+- **Cheapest first.** The top card shows the cheapest known price within 5, 10, 25 or 50 km for Bensin 95, Diesel or Bensin 98, how much it saves against the middle price nearby, and a **Kjør hit** button that opens driving directions in Google Maps.
+- **Every station.** All ~1,900 Norwegian fuel stations are listed, sorted by price or distance. Stations without a known price are shown too, last.
+- **Honest about age.** Each price shows when it was reported, coloured green (under 2 days), amber (under 2 weeks) or grey (older).
+- **Your own prices.** Tap a station to see all its prices, open it in Google Maps, or type in the price you see at the pump. Your prices stay on your phone and are used until a newer price arrives.
+- **Works offline.** A copy of all stations and prices is bundled into each build, and the app keeps the last download.
+- **Updates itself** from GitHub Releases.
 
-## Status
+## Data sources
 
-Not yet verified against the live price file. The field names in `CommunityPrices` (`app/src/main/java/com/bensinpris/app/data/Sources.kt`) are assumptions. Check them against `prices.json` before relying on prices.
+| What | From | Licence |
+| --- | --- | --- |
+| Stations (name, chain, address, position) | [Drivstoffpriser open data](https://drivstoffpriser.github.io/Drivstoffpriser-App/data/index.html), based on OpenStreetMap | ODbL |
+| Prices reported by drivers | Same open data, `prices.json` | ODbL |
+| Prices you enter | Your phone | — |
 
-## Building
+As of November 2026 the open price export holds about 200 prices, the newest from May 2026: Drivstoffpriser's own app now keeps live prices on a private server. No Norwegian chain publishes per-station prices openly (Denmark requires it by law; Norway does not), so fresher prices need a new source. `PriceBook` merging in `Parse.merge` takes any number of sources, newest price wins.
 
-Every push to `main` builds a signed APK and publishes it under Releases. The keystore is `keystore/bensinpris.jks`, which must be created once and kept, so each release can update the one before it.
+## Code
+
+- `data/` — pure Kotlin: `Parse` (feeds), `Rank` (distance, sorting, summary, Maps links), `Format` (numbers and ages). Unit-tested in `FuelTest`.
+- `data/Store.kt` — feeds cached on the phone, your prices, remembered choices.
+- `ui/` — `MainViewModel`, `HomeScreen`, `StationSheet`, theme.
+- `update/` — self-updater.
+
+Every push to `main` downloads the latest data into the APK, runs the tests, builds a signed release and publishes it.
