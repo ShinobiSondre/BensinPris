@@ -21,7 +21,7 @@ Finds the cheapest fuel near you in Norway. Norwegian and English.
 
 Which price wins for a station and fuel: newest first, where a website price counts as one day old and a chain estimate as two days old. So your own price or a fresh report beats the website, the website beats the chain estimate, and today's chain estimate beats a report from months ago. Website prices more than 15 % from the chain's typical price, and 98 cheaper than 95, are dropped as likely errors.
 
-Not used: Google Maps and Google Search pages (scraping them breaks Google's terms). Google's Places API has station fuel prices and could be added with your own API key.
+**Google Maps prices (optional):** paste your own Google Maps Platform key (Places API (New)) in the app's settings. The app then asks Google's Nearby Search for the 20 closest fuel stations, at most every 30 minutes or after moving 1 km, and uses the prices with Google's update times. Stations Google knows that the open list lacks are added. The key stays on the phone; never commit it to this public repo. Google Maps and Search pages themselves are not scraped (Google's terms forbid it).
 
 As of November 2026 the open price export holds about 200 prices, the newest from May 2026: Drivstoffpriser's own app now keeps live prices on a private server. No Norwegian chain publishes per-station prices openly (Denmark requires it by law; Norway does not), so fresher prices need a new source. `PriceBook` merging in `Parse.merge` takes any number of sources, newest price wins.
 

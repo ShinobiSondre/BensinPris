@@ -10,6 +10,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.bensinpris.app.data.CachedFeed
 import com.bensinpris.app.data.ChainStore
+import com.bensinpris.app.data.GoogleStore
 import com.bensinpris.app.data.WebStore
 import com.bensinpris.app.data.FuelType
 import com.bensinpris.app.data.MyPrices
@@ -54,6 +55,10 @@ data class UiState(
     val pricesFetchedAt: Long = 0L,
     val chainsFetchedAt: Long = 0L,
     val selectedId: String? = null,
+    val googleKeySet: Boolean = false,
+    /** What happened on the last Google lookup, shown in settings. */
+    val googleStatus: String? = null,
+    val showSettings: Boolean = false,
 ) {
     val selected: Spot? get() = selectedId?.let { id -> spots.firstOrNull { it.station.id == id } }
 }
@@ -71,6 +76,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Website prices per town, for the towns around you. */
     private val web = HashMap<String, WebStore.Town>()
     private var webJob: kotlinx.coroutines.Job? = null
+    private var google: GoogleStore.Result? = null
+    private var googleJob: kotlinx.coroutines.Job? = null
+    /** Our stations plus any Google knows that we don't. */
+    private var allStations: List<Station> = emptyList()
     private var book: PriceBook = emptyMap()
 
     init {
@@ -88,7 +97,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             community = CachedFeed.PRICES.read(ctx)?.let(Parse::prices).orEmpty()
             mine = MyPrices.load(ctx)
             chains = ChainStore.read(ctx)
+            google = GoogleStore.read(ctx)
         }
+        _state.update { it.copy(googleKeySet = Prefs.googleKey(ctx).isNotBlank()) }
         rebuild()
     }
 
@@ -119,12 +130,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             rebuild()
             _state.update { it.copy(refreshing = false, offline = failed) }
             loadTowns(force)
+            loadGoogle(force)
         }
     }
 
     private fun rebuild() {
-        val webBook = Parse.merge(*web.values.map { t -> Parse.matchWeb(stations, t.stations, chains.chains, t.at) }.toTypedArray())
-        book = Parse.merge(Parse.estimates(stations, chains.chains, chains.at), webBook, community, mine)
+        val (googleBook, extra) = Parse.matchGoogle(stations, google?.places.orEmpty())
+        allStations = stations + extra
+        val webBook = Parse.merge(*web.values.map { t -> Parse.matchWeb(allStations, t.stations, chains.chains, t.at) }.toTypedArray())
+        book = Parse.merge(Parse.estimates(allStations, chains.chains, chains.at), webBook, community, googleBook, mine)
         _state.update {
             it.copy(stationCount = stations.size, pricesFetchedAt = CachedFeed.PRICES.fetchedAt(ctx), chainsFetchedAt = chains.at)
         }
@@ -134,7 +148,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun recompute() {
         val s = _state.value
         val here = s.here ?: return
-        val spots = Rank.spots(stations, book, s.fuel, here.lat, here.lng, s.radiusKm * 1000.0, s.sort)
+        val spots = Rank.spots(allStations, book, s.fuel, here.lat, here.lng, s.radiusKm * 1000.0, s.sort)
         _state.update { it.copy(spots = spots, summary = Rank.summary(spots)) }
     }
 
@@ -156,6 +170,43 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (changed) rebuild()
         }
+    }
+
+    /** Google Maps prices around you, if you've added an API key. */
+    private fun loadGoogle(force: Boolean) {
+        val key = Prefs.googleKey(ctx)
+        val here = _state.value.here ?: return
+        if (key.isBlank()) return
+        val radius = _state.value.radiusKm * 1000
+        if (!force && GoogleStore.fresh(google, here.lat, here.lng, radius)) return
+        googleJob?.cancel()
+        googleJob = viewModelScope.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { GoogleStore.fetch(ctx, key, here.lat, here.lng, radius) } }
+            r.onSuccess { g ->
+                google = g
+                val priced = g.places.count { it.prices.isNotEmpty() }
+                _state.update {
+                    it.copy(googleStatus = tr(isNorwegian(), "Works: ${g.places.size} stations, $priced with price", "Virker: ${g.places.size} stasjoner, $priced med pris"))
+                }
+                rebuild()
+            }.onFailure { e ->
+                val msg = (e as? com.bensinpris.app.util.HttpException)?.let { h ->
+                    Regex("\"message\":\\s*\"([^\"]+)").find(h.body)?.groupValues?.get(1) ?: "HTTP ${h.code}"
+                } ?: (e.message ?: "?")
+                _state.update { it.copy(googleStatus = tr(isNorwegian(), "Error: $msg", "Feil: $msg")) }
+            }
+        }
+    }
+
+    fun openSettings(show: Boolean) = _state.update { it.copy(showSettings = show) }
+
+    fun saveGoogleKey(key: String) {
+        Prefs.setGoogleKey(ctx, key)
+        GoogleStore.clear(ctx)
+        google = null
+        _state.update { it.copy(googleKeySet = key.isNotBlank(), googleStatus = if (key.isBlank()) null else tr(isNorwegian(), "Checking …", "Sjekker …")) }
+        rebuild()
+        loadGoogle(force = true)
     }
 
     // ---- location ----
@@ -201,6 +252,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(here = Here(lat, lng, false)) }
         recompute()
         loadTowns(force = false)
+        loadGoogle(force = false)
         val place = withContext(Dispatchers.IO) { placeName(lat, lng) }
         if (place != null) _state.update { it.copy(place = place) }
     }
@@ -215,7 +267,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---- choices ----
 
     fun setFuel(f: FuelType) { Prefs.setFuel(ctx, f); _state.update { it.copy(fuel = f) }; recompute() }
-    fun setRadius(km: Int) { Prefs.setRadiusKm(ctx, km); _state.update { it.copy(radiusKm = km) }; recompute(); loadTowns(false) }
+    fun setRadius(km: Int) { Prefs.setRadiusKm(ctx, km); _state.update { it.copy(radiusKm = km) }; recompute(); loadTowns(false); loadGoogle(false) }
     fun setSort(s: SortBy) { Prefs.setSort(ctx, s); _state.update { it.copy(sort = s) }; recompute() }
 
     fun select(id: String?) = _state.update { it.copy(selectedId = id) }

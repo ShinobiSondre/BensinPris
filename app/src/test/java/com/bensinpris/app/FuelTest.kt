@@ -253,4 +253,49 @@ class FuelTest {
         )
         assertEquals(listOf("Skien", "Porsgrunn"), Parse.nearbyTowns(spots))
     }
+
+    // ---- Google Places API (New) ----
+
+    private val googleJson = """
+        {"places":[
+          {"id":"ChIJ1","displayName":{"text":"Uno-X Tollnes"},"shortFormattedAddress":"Tollnes, Skien",
+           "location":{"latitude":59.1800,"longitude":9.6100},
+           "fuelOptions":{"fuelPrices":[
+             {"type":"REGULAR_UNLEADED","price":{"currencyCode":"NOK","units":"20","nanos":870000000},"updateTime":"2026-11-12T21:30:00Z"},
+             {"type":"DIESEL","price":{"currencyCode":"NOK","units":"25","nanos":490000000},"updateTime":"2026-11-12T21:30:00Z"},
+             {"type":"LPG","price":{"currencyCode":"NOK","units":"12"}}]}},
+          {"id":"ChIJ2","displayName":{"text":"Circle K Skien"},"location":{"latitude":59.2000,"longitude":9.6000},
+           "fuelOptions":{"fuelPrices":[{"type":"PREMIUM","price":{"currencyCode":"NOK","units":"23","nanos":190000000},"updateTime":"2026-11-12T10:00:00Z"}]}},
+          {"id":"ChIJ3","displayName":{"text":"No prices"},"location":{"latitude":59.1,"longitude":9.5}}
+        ]}
+    """.trimIndent()
+
+    @Test fun parses_google_fuel_prices() {
+        val g = Parse.googlePlaces(googleJson)
+        assertEquals(3, g.size)
+        assertEquals(20.87, g[0].prices[FuelType.PETROL95]!!.first, 1e-9)
+        assertEquals(Parse.time("2026-11-12T21:30:00Z"), g[0].prices[FuelType.PETROL95]!!.second)
+        assertEquals(25.49, g[0].prices[FuelType.DIESEL]!!.first, 1e-9)
+        assertEquals(2, g[0].prices.size) // LPG isn't ours
+        assertEquals(23.19, g[1].prices[FuelType.PETROL98]!!.first, 1e-9)
+    }
+
+    @Test fun google_matches_our_station_or_adds_a_new_one() {
+        val ours = listOf(Station("osm_ck", "Circle K Skien", "Circle K", "", "Skien", 59.2003, 9.6001)) // ~35 m away
+        val (book, extra) = Parse.matchGoogle(ours, Parse.googlePlaces(googleJson))
+        assertEquals(23.19, book["osm_ck"]!![FuelType.PETROL98]!!.price, 1e-9)
+        assertEquals(PriceSource.GOOGLE, book["osm_ck"]!![FuelType.PETROL98]!!.source)
+        assertEquals(1, extra.size) // Uno-X Tollnes isn't in our list; the place without prices is skipped
+        assertEquals("Uno-X Tollnes", extra[0].name)
+        assertEquals("Uno-X", extra[0].brand)
+        assertEquals(20.87, book["g_ChIJ1"]!![FuelType.PETROL95]!!.price, 1e-9)
+    }
+
+    @Test fun fresh_google_price_beats_chain_and_website() {
+        val now = 1_000L * Format.DAY
+        val chain = mapOf("x" to mapOf(FuelType.PETROL95 to FuelPrice(22.3, now, 0, PriceSource.CHAIN, "Uno-X")))
+        val web = mapOf("x" to mapOf(FuelType.PETROL95 to FuelPrice(21.9, now, 0, PriceSource.WEB, "drivstoffapp.no")))
+        val google = mapOf("x" to mapOf(FuelType.PETROL95 to FuelPrice(20.87, now - 3 * Format.HOUR, 1, PriceSource.GOOGLE, "Google")))
+        assertEquals(20.87, Parse.merge(chain, web, google)["x"]!![FuelType.PETROL95]!!.price, 1e-9)
+    }
 }

@@ -117,6 +117,47 @@ object WebStore {
     }
 }
 
+/**
+ * Fuel prices from Google Maps through the official Places API (New), with your own API key.
+ * One Nearby Search per area: reused for 30 minutes unless you move more than 1 km.
+ */
+object GoogleStore {
+    private const val URL = "https://places.googleapis.com/v1/places:searchNearby"
+    private const val MAX_AGE = 30 * 60 * 1000L
+    private fun file(ctx: Context) = File(ctx.filesDir, "google.json")
+
+    data class Result(val places: List<GooglePlace>, val at: Long, val lat: Double, val lng: Double, val radius: Int)
+
+    fun read(ctx: Context): Result? = runCatching {
+        val o = JSONObject(file(ctx).readText())
+        Result(Parse.googlePlaces(o.getString("raw")), o.getLong("at"), o.getDouble("lat"), o.getDouble("lng"), o.getInt("radius"))
+    }.getOrNull()
+
+    fun fresh(r: Result?, lat: Double, lng: Double, radius: Int): Boolean =
+        r != null && System.currentTimeMillis() - r.at < MAX_AGE && r.radius == radius &&
+            Rank.distanceM(lat, lng, r.lat, r.lng) < 1000
+
+    suspend fun fetch(ctx: Context, key: String, lat: Double, lng: Double, radius: Int): Result {
+        val body = JSONObject()
+            .put("includedTypes", JSONArray().put("gas_station"))
+            .put("maxResultCount", 20)
+            .put("rankPreference", "DISTANCE")
+            .put("languageCode", "no")
+            .put("locationRestriction", JSONObject().put("circle", JSONObject()
+                .put("center", JSONObject().put("latitude", lat).put("longitude", lng))
+                .put("radius", radius.coerceIn(1000, 50_000).toDouble())))
+        val raw = Http.post(URL, body.toString(), "application/json", headers = mapOf(
+            "X-Goog-Api-Key" to key,
+            "X-Goog-FieldMask" to "places.id,places.displayName,places.shortFormattedAddress,places.location,places.fuelOptions",
+        ))
+        val now = System.currentTimeMillis()
+        file(ctx).writeText(JSONObject().put("raw", raw).put("at", now).put("lat", lat).put("lng", lng).put("radius", radius).toString())
+        return Result(Parse.googlePlaces(raw), now, lat, lng, radius)
+    }
+
+    fun clear(ctx: Context) { file(ctx).delete() }
+}
+
 /** Prices you typed in yourself, kept only on this phone. */
 object MyPrices {
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("my_prices", Context.MODE_PRIVATE)
@@ -164,6 +205,9 @@ object Prefs {
 
     fun radiusKm(ctx: Context) = p(ctx).getInt("radius", 10)
     fun setRadiusKm(ctx: Context, km: Int) = p(ctx).edit().putInt("radius", km).apply()
+
+    fun googleKey(ctx: Context) = p(ctx).getString("google_key", "").orEmpty()
+    fun setGoogleKey(ctx: Context, k: String) = p(ctx).edit().putString("google_key", k.trim()).apply()
 
     fun sort(ctx: Context) = runCatching { SortBy.valueOf(p(ctx).getString("sort", "PRICE")!!) }.getOrDefault(SortBy.PRICE)
     fun setSort(ctx: Context, s: SortBy) = p(ctx).edit().putString("sort", s.name).apply()

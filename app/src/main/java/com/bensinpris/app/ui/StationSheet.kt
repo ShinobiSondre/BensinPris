@@ -114,7 +114,7 @@ fun StationSheet(
                                 PriceSource.ME -> tr(no, "Your price · ", "Din pris · ")
                                 PriceSource.COMMUNITY -> if (p.reports > 1)
                                     tr(no, "${p.reports} reports · ", "${p.reports} meldinger · ") else ""
-                                PriceSource.CHAIN, PriceSource.WEB -> ""
+                                PriceSource.CHAIN, PriceSource.WEB, PriceSource.GOOGLE -> ""
                             }
                             PriceNote(p, now, no, prefix = who)
                         }

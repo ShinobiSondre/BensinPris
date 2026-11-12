@@ -15,13 +15,15 @@ object Http {
     fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
 
     suspend fun get(url: String, timeoutMs: Int = 15000, accept: String = "application/json"): String =
-        request("GET", url, null, null, timeoutMs, accept)
+        request("GET", url, null, null, timeoutMs, accept, emptyMap())
 
-    suspend fun post(url: String, body: String, contentType: String, timeoutMs: Int = 30000): String =
-        request("POST", url, body, contentType, timeoutMs, "application/json")
+    suspend fun post(
+        url: String, body: String, contentType: String, timeoutMs: Int = 30000, headers: Map<String, String> = emptyMap(),
+    ): String = request("POST", url, body, contentType, timeoutMs, "application/json", headers)
 
     private suspend fun request(
         method: String, url: String, body: String?, contentType: String?, timeoutMs: Int, accept: String,
+        headers: Map<String, String>,
     ): String = withContext(Dispatchers.IO) {
         val c = URL(url).openConnection() as HttpURLConnection
         try {
@@ -30,6 +32,7 @@ object Http {
             c.readTimeout = timeoutMs
             c.setRequestProperty("User-Agent", UA)
             c.setRequestProperty("Accept", accept)
+            headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
             if (body != null) {
                 c.doOutput = true
                 c.setRequestProperty("Content-Type", contentType ?: "application/json")

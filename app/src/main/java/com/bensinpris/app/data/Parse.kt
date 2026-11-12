@@ -92,8 +92,73 @@ object Parse {
     }
 
     private fun rank(p: FuelPrice) = when (p.source) {
-        PriceSource.ME -> 3; PriceSource.COMMUNITY -> 2; PriceSource.WEB -> 1; PriceSource.CHAIN -> 0
+        PriceSource.ME -> 4; PriceSource.GOOGLE -> 3; PriceSource.COMMUNITY -> 2; PriceSource.WEB -> 1; PriceSource.CHAIN -> 0
     }
+
+    // ---------- Google Places API (New): places:searchNearby with places.fuelOptions ----------
+
+    /** Google fuel types as used in Norway: "Blyfri 95" is regular unleaded or SP95, 98 is premium or SP98. */
+    private fun googleFuel(t: String): FuelType? = when (t) {
+        "DIESEL" -> FuelType.DIESEL
+        "REGULAR_UNLEADED", "SP95", "SP95_E10" -> FuelType.PETROL95
+        "PREMIUM", "SP98" -> FuelType.PETROL98
+        else -> null
+    }
+
+    fun googlePlaces(json: String): List<GooglePlace> {
+        val arr = runCatching { JSONObject(json).optJSONArray("places") }.getOrNull() ?: return emptyList()
+        val out = ArrayList<GooglePlace>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val loc = o.optJSONObject("location") ?: continue
+            val lat = loc.optDouble("latitude", Double.NaN)
+            val lng = loc.optDouble("longitude", Double.NaN)
+            if (lat.isNaN() || lng.isNaN()) continue
+            val prices = HashMap<FuelType, Pair<Double, Long?>>()
+            val list = o.optJSONObject("fuelOptions")?.optJSONArray("fuelPrices")
+            if (list != null) for (j in 0 until list.length()) {
+                val f = list.optJSONObject(j) ?: continue
+                val fuel = googleFuel(f.optString("type")) ?: continue
+                val money = f.optJSONObject("price") ?: continue
+                if (money.optString("currencyCode", "NOK") != "NOK") continue
+                val v = money.optString("units", "0").toDoubleOrNull()?.plus(money.optLong("nanos", 0) / 1e9) ?: continue
+                if (!plausible(v)) continue
+                val t = time(f.optString("updateTime"))
+                val old = prices[fuel]
+                if (old == null || (t ?: 0) > (old.second ?: 0)) prices[fuel] = v to t
+            }
+            out += GooglePlace(
+                id = o.optString("id"),
+                name = o.optJSONObject("displayName")?.optString("text").orEmpty(),
+                address = o.optString("shortFormattedAddress"),
+                lat = lat, lng = lng, prices = prices,
+            )
+        }
+        return out
+    }
+
+    /**
+     * Google prices on our stations (nearest within [maxM]). Google stations we don't have
+     * are returned as new stations, so nothing Google knows is lost.
+     */
+    fun matchGoogle(stations: List<Station>, places: List<GooglePlace>, maxM: Double = 150.0): Pair<PriceBook, List<Station>> {
+        val book = HashMap<String, Map<FuelType, FuelPrice>>()
+        val extra = ArrayList<Station>()
+        for (g in places) {
+            if (g.prices.isEmpty()) continue
+            val st = stations.asSequence()
+                .filter { kotlin.math.abs(it.lat - g.lat) < 0.003 && kotlin.math.abs(it.lng - g.lng) < 0.006 }
+                .map { it to Rank.distanceM(g.lat, g.lng, it.lat, it.lng) }
+                .filter { it.second <= maxM }
+                .minByOrNull { it.second }?.first
+                ?: Station("g_${g.id}", g.name.ifBlank { "Bensinstasjon" }, brandOf(g.name), g.address, "", g.lat, g.lng).also { extra += it }
+            book[st.id] = g.prices.mapValues { (_, v) -> FuelPrice(v.first, v.second, 1, PriceSource.GOOGLE, "Google") }
+        }
+        return book to extra
+    }
+
+    private val KNOWN_BRANDS = listOf("Circle K", "Uno-X", "St1", "YX", "Esso", "Shell", "Driv", "Best", "Tanken", "Automat1", "Automat 1", "Bunker Oil")
+    private fun brandOf(name: String) = KNOWN_BRANDS.firstOrNull { name.startsWith(it, ignoreCase = true) }.orEmpty()
 
     // ---------- station prices from drivstoffapp.no (schema.org GasStation data on each town page) ----------
 

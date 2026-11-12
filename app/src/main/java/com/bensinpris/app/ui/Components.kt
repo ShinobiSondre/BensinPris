@@ -111,6 +111,8 @@ fun PriceNote(p: FuelPrice, now: Long, no: Boolean, color: Color? = null, prefix
             style = MaterialTheme.typography.labelMedium,
             color = color ?: MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    } else if (p.source == com.bensinpris.app.data.PriceSource.GOOGLE) {
+        AgeLabel(p.updatedAt, now, no, color, prefix + "Google · ")
     } else {
         AgeLabel(p.updatedAt, now, no, color, prefix)
     }

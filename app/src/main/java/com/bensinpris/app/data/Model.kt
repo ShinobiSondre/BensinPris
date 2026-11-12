@@ -30,6 +30,8 @@ enum class PriceSource {
     ME,
     /** The chain's typical price today, not measured at this station. */
     CHAIN,
+    /** Google Maps (Places API), with the time Google last updated the price. */
+    GOOGLE,
     /** A station price published on a public website (drivstoffapp.no); no report time is given. */
     WEB,
 }
@@ -46,6 +48,12 @@ data class FuelPrice(
 ) {
     val isEstimate get() = source == PriceSource.CHAIN
 }
+
+/** A gas station from Google Places with its fuel prices and when each was updated. */
+data class GooglePlace(
+    val id: String, val name: String, val address: String, val lat: Double, val lng: Double,
+    val prices: Map<FuelType, Pair<Double, Long?>>,
+)
 
 /** A station with prices as listed on a public price website. */
 data class WebStation(val name: String, val lat: Double, val lng: Double, val prices: Map<FuelType, Double>)

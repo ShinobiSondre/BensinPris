@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material3.Button
@@ -102,7 +103,7 @@ fun HomeScreen(vm: MainViewModel) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                item(key = "header") { Header(s, no, onRefresh = { vm.refresh(force = true) }) }
+                item(key = "header") { Header(s, no, onRefresh = { vm.refresh(force = true) }, onSettings = { vm.openSettings(true) }) }
                 item(key = "controls") { Controls(s, no, vm) }
                 if (s.offline) item(key = "offline") { OfflineNote(no) }
 
@@ -155,6 +156,13 @@ fun HomeScreen(vm: MainViewModel) {
         }
     }
 
+    if (s.showSettings) {
+        SettingsSheet(
+            no = no, keySet = s.googleKeySet, status = s.googleStatus,
+            onSave = vm::saveGoogleKey, onDismiss = { vm.openSettings(false) },
+        )
+    }
+
     s.selected?.let { spot ->
         StationSheet(
             spot = spot, fuel = s.fuel, no = no, now = now,
@@ -170,7 +178,7 @@ fun tr(no: Boolean, en: String, nb: String) = if (no) nb else en
 // ---------- header & controls ----------
 
 @Composable
-private fun Header(s: UiState, no: Boolean, onRefresh: () -> Unit) {
+private fun Header(s: UiState, no: Boolean, onRefresh: () -> Unit, onSettings: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("BensinPris", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
@@ -195,6 +203,7 @@ private fun Header(s: UiState, no: Boolean, onRefresh: () -> Unit) {
         } else {
             IconButton(onClick = onRefresh) { Icon(Icons.Filled.Refresh, tr(no, "Refresh", "Oppdater")) }
         }
+        IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, tr(no, "Settings", "Innstillinger")) }
     }
 }
 
@@ -268,7 +277,7 @@ private fun HeroCard(
             prefix = when (price.source) {
                 PriceSource.ME -> tr(no, "Your price · ", "Din pris · ")
                 PriceSource.COMMUNITY -> tr(no, "Reported ", "Meldt ")
-                PriceSource.CHAIN, PriceSource.WEB -> ""
+                PriceSource.CHAIN, PriceSource.WEB, PriceSource.GOOGLE -> ""
             },
         )
         if (price.isEstimate) {
@@ -434,8 +443,8 @@ private fun Footer(pricesAt: Long, chainsAt: Long, stationCount: Int, no: Boolea
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            tr(no, "Data: Drivstoffpriser (ODbL) · © OpenStreetMap contributors · chain prices: DrivstoffAppen · station prices: drivstoffapp.no",
-                "Data: Drivstoffpriser (ODbL) · © OpenStreetMap-bidragsytere · kjedepriser: DrivstoffAppen · stasjonspriser: drivstoffapp.no") +
+            tr(no, "Data: Drivstoffpriser (ODbL) · © OpenStreetMap contributors · chain prices: DrivstoffAppen · station prices: drivstoffapp.no, Google",
+                "Data: Drivstoffpriser (ODbL) · © OpenStreetMap-bidragsytere · kjedepriser: DrivstoffAppen · stasjonspriser: drivstoffapp.no, Google") +
                 " · v${BuildConfig.VERSION_NAME}",
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
