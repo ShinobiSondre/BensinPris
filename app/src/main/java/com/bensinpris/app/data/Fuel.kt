@@ -13,7 +13,7 @@ enum class FuelType(val label: String) {
     DIESEL("Diesel"),
 }
 
-/** A fuel station from OpenStreetMap (location only). */
+/** A fuel station from OpenStreetMap. [id] is the OSM id without its type prefix, e.g. "1118788394". */
 data class Station(
     val id: String,
     val name: String,
@@ -22,20 +22,19 @@ data class Station(
     val lng: Double,
 )
 
-/** One community price report, with the coordinates of where it was reported. */
+/** Community prices for one station, all fuel types merged. */
 data class PriceReport(
-    val lat: Double,
-    val lng: Double,
-    val brand: String,
+    val stationId: String,
     val prices: Map<FuelType, Double>,
-    val reportedAt: Long?,
+    /** Newest update time across the fuel types, in epoch millis. */
+    val updatedAt: Long?,
 )
 
-/** A station with its price for the chosen fuel (null = nobody has reported a price). */
+/** A station with its price for the chosen fuel (null = no price reported for that fuel). */
 data class StationPrice(
     val station: Station,
     val price: Double?,
-    val reportedAt: Long?,
+    val updatedAt: Long?,
     val distanceM: Double,
 )
 
@@ -50,25 +49,9 @@ object Fuel {
         return 2 * r * atan2(sqrt(a), sqrt(1 - a))
     }
 
-    /**
-     * Attach each price report to the nearest station within [maxM] metres.
-     * Returns station id -> newest report for that station.
-     */
-    fun matchReports(stations: List<Station>, reports: List<PriceReport>, maxM: Double = 60.0): Map<String, PriceReport> {
-        val out = HashMap<String, PriceReport>()
-        for (r in reports) {
-            var best: Station? = null
-            var bestD = maxM
-            for (s in stations) {
-                val d = distanceM(r.lat, r.lng, s.lat, s.lng)
-                if (d <= bestD) { best = s; bestD = d }
-            }
-            val s = best ?: continue
-            val old = out[s.id]
-            if (old == null || (r.reportedAt ?: 0L) > (old.reportedAt ?: 0L)) out[s.id] = r
-        }
-        return out
-    }
+    /** Station id -> its price report. Matching is by OSM id, so no distance check is needed. */
+    fun byStation(reports: List<PriceReport>): Map<String, PriceReport> =
+        reports.associateBy { it.stationId }
 
     /**
      * Stations within [radiusM] of you, cheapest first for [fuel].
@@ -86,7 +69,7 @@ object Fuel {
             .map { s ->
                 val d = distanceM(fromLat, fromLng, s.lat, s.lng)
                 val rep = reports[s.id]
-                StationPrice(s, rep?.prices?.get(fuel), rep?.reportedAt, d)
+                StationPrice(s, rep?.prices?.get(fuel), rep?.updatedAt, d)
             }
             .filter { it.distanceM <= radiusM }
             .sortedWith(

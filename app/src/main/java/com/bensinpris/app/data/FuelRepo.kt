@@ -24,8 +24,7 @@ object FuelRepo {
             .onFailure { pricesError = it.message ?: "unknown" }
             .getOrDefault(emptyList())
 
-        val matched = Fuel.matchReports(stations, reports)
-        val rows = Fuel.rank(stations, matched, fuel, lat, lng, radiusM.toDouble())
+        val rows = Fuel.rank(stations, Fuel.byStation(reports), fuel, lat, lng, radiusM.toDouble())
         return Result(
             rows = rows,
             pricesAvailable = reports.isNotEmpty(),

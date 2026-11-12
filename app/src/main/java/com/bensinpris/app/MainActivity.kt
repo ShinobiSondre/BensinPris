@@ -202,6 +202,9 @@ private fun ResultList(done: UiState.Done, ctx: android.content.Context) {
     }
 }
 
+private fun dateFmt(ms: Long): String =
+    java.text.SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(java.util.Date(ms))
+
 @Composable
 private fun StationCard(row: StationPrice, ctx: android.content.Context) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -213,7 +216,15 @@ private fun StationCard(row: StationPrice, ctx: android.content.Context) {
                     style = MaterialTheme.typography.titleMedium,
                 )
             }
-            Text(String.format(Locale.US, "%.1f km", row.distanceM / 1000.0))
+            val updated = row.updatedAt
+            val line = String.format(Locale.US, "%.1f km", row.distanceM / 1000.0) +
+                (updated?.let { "  ·  " + tr("price from ", "pris fra ") + dateFmt(it) } ?: "")
+            Text(line)
+            // Community prices can be months old, so say so when they are.
+            if (updated != null && System.currentTimeMillis() - updated > 30L * 24 * 3600 * 1000) {
+                Text(tr("Old price, may be out of date", "Gammel pris, kan være utdatert"),
+                    style = MaterialTheme.typography.bodySmall)
+            }
             TextButton(onClick = {
                 ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Fuel.mapsDirectionsUrl(row.station))))
             }) {

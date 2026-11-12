@@ -3,6 +3,8 @@ package com.bensinpris.app.data
 import com.bensinpris.app.util.Http
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 /**
  * Source 1: fuel stations from OpenStreetMap, via the free Overpass API (no key).
@@ -37,7 +39,7 @@ object OsmStations {
             val tags = e.optJSONObject("tags") ?: JSONObject()
             val brand = tags.optString("brand").ifBlank { tags.optString("operator") }
             Station(
-                id = "${e.optString("type")}/${e.optLong("id")}",
+                id = e.optLong("id").toString(),
                 name = tags.optString("name").ifBlank { brand.ifBlank { "Bensinstasjon" } },
                 brand = brand,
                 lat = lat,
@@ -51,52 +53,50 @@ object OsmStations {
  * Source 2: community-reported fuel prices, from the open data that drivstoffpriser publishes
  * (refreshed every 12 hours, free to use).
  *
- * UNVERIFIED: the field names below were not checked against the live file. Compare them with
- * prices.json once and fix the constants if they differ. A failed parse shows "no prices",
- * never a wrong price.
+ * Shape confirmed from a sample export: {"exportedAt", "count", "prices": [ {updatedAt, fuelType,
+ * stationId ("osm_<OSM id>"), price, reportCount} ]}. One row per station and fuel type.
+ * "petrol98" is assumed for Bensin 98 (not seen in the sample yet).
  */
 object CommunityPrices {
     const val PRICES_URL = "https://drivstoffpriser.github.io/Drivstoffpriser-App/data/prices.json"
 
-    // Assumed JSON keys (see note above).
-    private const val KEY_LIST = "stations"
-    private const val KEY_LAT = "lat"
-    private const val KEY_LNG = "lng"
-    private const val KEY_BRAND = "brand"
-    private const val KEY_TIME = "updatedAt"
+    private val OSLO = ZoneId.of("Europe/Oslo")
     private val FUEL_KEYS = mapOf(
-        FuelType.PETROL95 to "petrol95",
-        FuelType.PETROL98 to "petrol98",
-        FuelType.DIESEL to "diesel",
+        "petrol95" to FuelType.PETROL95,
+        "petrol98" to FuelType.PETROL98,
+        "diesel" to FuelType.DIESEL,
     )
 
     suspend fun fetch(): List<PriceReport> = parse(Http.get(PRICES_URL, timeoutMs = 30000))
 
     fun parse(json: String): List<PriceReport> {
         val root = json.trim()
-        val arr: JSONArray = if (root.startsWith("[")) JSONArray(root)
-            else JSONObject(root).optJSONArray(KEY_LIST) ?: return emptyList()
-        return (0 until arr.length()).mapNotNull { i ->
-            val o = arr.optJSONObject(i) ?: return@mapNotNull null
-            val lat = o.optDouble(KEY_LAT, Double.NaN)
-            val lng = o.optDouble(KEY_LNG, Double.NaN)
-            if (lat.isNaN() || lng.isNaN()) return@mapNotNull null
-            val prices = FUEL_KEYS.mapNotNull { (fuel, key) ->
-                val v = o.optDouble(key, Double.NaN)
-                if (v.isNaN() || v <= 0.0) null else fuel to v
-            }.toMap()
-            if (prices.isEmpty()) return@mapNotNull null
-            PriceReport(
-                lat = lat,
-                lng = lng,
-                brand = o.optString(KEY_BRAND),
-                prices = prices,
-                reportedAt = o.optString(KEY_TIME).takeIf { it.isNotBlank() }?.let { parseTime(it) },
-            )
+        val rows: JSONArray = if (root.startsWith("[")) JSONArray(root)
+            else JSONObject(root).optJSONArray("prices") ?: return emptyList()
+
+        // Group the per-fuel rows by station.
+        val byStation = LinkedHashMap<String, MutableMap<FuelType, Double>>()
+        val newest = HashMap<String, Long>()
+        for (i in 0 until rows.length()) {
+            val o = rows.optJSONObject(i) ?: continue
+            val fuel = FUEL_KEYS[o.optString("fuelType")] ?: continue
+            val price = o.optDouble("price", Double.NaN)
+            if (price.isNaN() || price <= 0.0) continue
+            val stationId = o.optString("stationId").removePrefix("osm_")
+            if (stationId.isBlank()) continue
+
+            byStation.getOrPut(stationId) { mutableMapOf() }[fuel] = price
+            parseTime(o.optString("updatedAt"))?.let { t ->
+                newest[stationId] = maxOf(newest[stationId] ?: 0L, t)
+            }
+        }
+        return byStation.map { (id, prices) ->
+            PriceReport(id, prices.toMap(), newest[id])
         }
     }
 
+    /** The export has no time zone, so it is read as Norwegian local time. */
     private fun parseTime(s: String): Long? = runCatching {
-        java.time.Instant.parse(s).toEpochMilli()
+        LocalDateTime.parse(s).atZone(OSLO).toInstant().toEpochMilli()
     }.getOrNull()
 }

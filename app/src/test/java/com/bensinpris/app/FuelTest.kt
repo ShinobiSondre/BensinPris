@@ -13,49 +13,36 @@ import org.junit.Test
 class FuelTest {
     private val here = 59.9133 to 10.7389
 
-    private val near = Station("node/1", "Circle K Grünerløkka", "Circle K", 59.9140, 10.7389)
-    private val mid = Station("node/2", "YX Sinsen", "YX", 59.9230, 10.7389)
-    private val far = Station("node/3", "Uno-X Ullevål", "Uno-X", 59.9500, 10.7389)
+    private val near = Station("1", "Circle K Grünerløkka", "Circle K", 59.9140, 10.7389)
+    private val mid = Station("2", "YX Sinsen", "YX", 59.9230, 10.7389)
+    private val far = Station("3", "Uno-X Ullevål", "Uno-X", 59.9500, 10.7389)
     private val stations = listOf(near, mid, far)
 
     @Test
     fun distance_is_about_right() {
         // 0.001 degrees of latitude is roughly 111 m
-        val d = Fuel.distanceM(59.0, 10.0, 59.001, 10.0)
-        assertEquals(111.0, d, 2.0)
+        assertEquals(111.0, Fuel.distanceM(59.0, 10.0, 59.001, 10.0), 2.0)
     }
 
     @Test
-    fun report_matches_nearest_station_within_60m() {
-        val reports = listOf(
-            PriceReport(59.91401, 10.7389, "Circle K", mapOf(FuelType.PETROL95 to 19.5), 1_000L),
-            PriceReport(60.5, 11.0, "Nowhere", mapOf(FuelType.PETROL95 to 15.0), 1_000L),
-        )
-        val matched = Fuel.matchReports(stations, reports)
-        assertEquals(setOf("node/1"), matched.keys)
-    }
-
-    @Test
-    fun newest_report_wins_for_a_station() {
-        val reports = listOf(
-            PriceReport(59.9140, 10.7389, "", mapOf(FuelType.PETROL95 to 20.0), 1_000L),
-            PriceReport(59.9140, 10.7389, "", mapOf(FuelType.PETROL95 to 19.0), 2_000L),
-        )
-        assertEquals(19.0, Fuel.matchReports(stations, reports)["node/1"]!!.prices[FuelType.PETROL95]!!, 0.0)
-    }
-
-    @Test
-    fun cheapest_first_then_unpriced_by_distance_and_radius_is_respected() {
-        val reports = mapOf(
-            "node/1" to PriceReport(0.0, 0.0, "", mapOf(FuelType.PETROL95 to 20.5), null),
-            "node/2" to PriceReport(0.0, 0.0, "", mapOf(FuelType.PETROL95 to 19.9), null),
-        )
+    fun cheapest_first_then_unpriced_and_radius_is_respected() {
+        val reports = Fuel.byStation(listOf(
+            PriceReport("1", mapOf(FuelType.PETROL95 to 20.5), null),
+            PriceReport("2", mapOf(FuelType.PETROL95 to 19.9), null),
+        ))
         val rows = Fuel.rank(stations, reports, FuelType.PETROL95, here.first, here.second, 10_000.0)
-        assertEquals(listOf("node/2", "node/1", "node/3"), rows.map { it.station.id })
+        assertEquals(listOf("2", "1", "3"), rows.map { it.station.id })
         assertNull(rows.last().price)
 
         val within3km = Fuel.rank(stations, reports, FuelType.PETROL95, here.first, here.second, 3_000.0)
-        assertEquals(listOf("node/2", "node/1"), within3km.map { it.station.id })
+        assertEquals(listOf("2", "1"), within3km.map { it.station.id })
+    }
+
+    @Test
+    fun a_fuel_without_a_price_is_unpriced_for_that_station() {
+        val reports = Fuel.byStation(listOf(PriceReport("1", mapOf(FuelType.DIESEL to 21.0), null)))
+        val rows = Fuel.rank(stations, reports, FuelType.PETROL95, here.first, here.second, 10_000.0)
+        assertNull(rows.first { it.station.id == "1" }.price)
     }
 
     @Test
@@ -70,28 +57,31 @@ class FuelTest {
     fun parses_overpass_nodes_and_ways() {
         val json = """
             {"elements":[
-              {"type":"node","id":1,"lat":59.9,"lon":10.7,"tags":{"amenity":"fuel","brand":"YX","name":"YX Sentrum"}},
+              {"type":"node","id":1118788394,"lat":59.9,"lon":10.7,"tags":{"amenity":"fuel","brand":"YX","name":"YX Sentrum"}},
               {"type":"way","id":2,"center":{"lat":59.8,"lon":10.6},"tags":{"amenity":"fuel","operator":"Esso"}}
             ]}
         """.trimIndent()
         val s = OsmStations.parse(json)
-        assertEquals(2, s.size)
+        assertEquals("1118788394", s[0].id)
         assertEquals("YX Sentrum", s[0].name)
-        assertEquals("Esso", s[1].name) // falls back to operator when there is no name
+        assertEquals("Esso", s[1].name)
         assertEquals(59.8, s[1].lat, 0.0)
     }
 
     @Test
-    fun parses_price_feed_and_drops_entries_without_prices() {
+    fun parses_sample_export_merging_fuel_rows_per_station() {
         val json = """
-            {"stations":[
-              {"lat":59.9,"lng":10.7,"brand":"YX","petrol95":19.9,"diesel":20.1,"updatedAt":"2026-11-12T10:00:00Z"},
-              {"lat":59.8,"lng":10.6,"brand":"Esso"}
+            {"exportedAt":"2026-11-12T14:49:24Z","count":3,"prices":[
+              {"updatedAt":"2026-04-18T12:51:02.310296","fuelType":"diesel","stationId":"osm_1118788394","price":20.99,"reportCount":4},
+              {"updatedAt":"2026-04-18T12:51:01.555862","fuelType":"petrol95","stationId":"osm_1118788394","price":17.99,"reportCount":3},
+              {"updatedAt":"2026-04-19T08:00:00","fuelType":"fuel_unknown","stationId":"osm_5","price":9.0,"reportCount":1}
             ]}
         """.trimIndent()
         val r = CommunityPrices.parse(json)
         assertEquals(1, r.size)
-        assertEquals(19.9, r[0].prices[FuelType.PETROL95]!!, 0.0)
+        assertEquals("1118788394", r[0].stationId)
+        assertEquals(17.99, r[0].prices[FuelType.PETROL95]!!, 0.0)
+        assertEquals(20.99, r[0].prices[FuelType.DIESEL]!!, 0.0)
         assertNull(r[0].prices[FuelType.PETROL98])
     }
 }
