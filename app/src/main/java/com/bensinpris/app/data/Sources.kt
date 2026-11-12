@@ -10,20 +10,28 @@ import java.time.ZoneId
  * Source 1: fuel stations from OpenStreetMap, via the free Overpass API (no key).
  */
 object OsmStations {
+    // Public mirrors. The main one often answers 504 when busy, so the others are tried too.
     private val SERVERS = listOf(
         "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.openstreetmap.fr/api/interpreter",
         "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     )
 
     suspend fun near(lat: Double, lng: Double, radiusM: Int): List<Station> {
         val q = "[out:json][timeout:25];nwr(around:$radiusM,$lat,$lng)[\"amenity\"=\"fuel\"];out center tags;"
+        val body = "data=" + Http.enc(q)
         var lastError: Exception? = null
-        for (server in SERVERS) {
-            try {
-                return parse(Http.post(server, "data=" + Http.enc(q), "application/x-www-form-urlencoded"))
-            } catch (e: Exception) {
-                lastError = e
+        // Two rounds over all mirrors, with a pause, since busy servers often answer again shortly after.
+        for (round in 0..1) {
+            for (server in SERVERS) {
+                try {
+                    return parse(Http.post(server, body, "application/x-www-form-urlencoded", timeoutMs = 30000))
+                } catch (e: Exception) {
+                    lastError = e
+                }
             }
+            if (round == 0) kotlinx.coroutines.delay(2000)
         }
         throw lastError ?: IllegalStateException("No Overpass server answered")
     }

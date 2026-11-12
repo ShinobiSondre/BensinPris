@@ -194,7 +194,7 @@ private fun ResultList(done: UiState.Done, ctx: android.content.Context) {
                     "Fikk ikke lastet prisene. Stasjonene vises uten pris."))
             }
         }
-        r.stationsError?.let { item { Text(tr("Station list failed: $it", "Stasjonslisten feilet: $it")) } }
+        r.stationsError?.let { item { Text(tr("The station server is busy or unreachable. Try again in a moment.", "Stasjonstjenesten er opptatt eller utilgjengelig. Prøv igjen om litt.")) } }
         if (r.rows.isEmpty() && r.stationsError == null) {
             item { Text(tr("No fuel stations within this distance.", "Ingen bensinstasjoner innen valgt avstand.")) }
         }
