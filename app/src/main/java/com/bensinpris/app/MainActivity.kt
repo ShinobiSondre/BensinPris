@@ -42,6 +42,8 @@ import com.bensinpris.app.data.FuelRepo
 import com.bensinpris.app.data.Fuel
 import com.bensinpris.app.data.FuelType
 import com.bensinpris.app.data.StationPrice
+import com.bensinpris.app.update.UpdateOverlay
+import com.bensinpris.app.update.Updater
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
@@ -51,9 +53,18 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Updater.start(this)
         setContent {
-            MaterialTheme { BensinPrisScreen() }
+            MaterialTheme {
+                BensinPrisScreen()
+                UpdateOverlay()
+            }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        Updater.onResume(this)
     }
 }
 

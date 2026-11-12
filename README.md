@@ -4,6 +4,7 @@ Finds the cheapest fuel near you in Norway, in Norwegian and English.
 
 - **Cheapest first.** Stations within 5, 10 or 25 km, sorted by price for Bensin 95, Bensin 98 or Diesel. Stations with no price are listed last.
 - **Several sources.** Station locations come from OpenStreetMap (Overpass API, free, no key). Prices come from community reports published as open data by drivstoffpriser (refreshed every 12 hours, free to use). Each price is matched to the nearest station within 60 m.
+- **Updates itself.** The app checks GitHub Releases for a newer build when it opens, when it comes back to the front, and every 10 minutes while open, then installs it.
 - **Open in Google Maps.** Each station has a button that starts driving directions to it.
 
 ## Status
