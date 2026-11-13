@@ -185,8 +185,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             r.onSuccess { g ->
                 google = g
                 val priced = g.places.count { it.prices.isNotEmpty() }
+                val detail = " · fuelOptions: ${g.withFuelOptions}" +
+                    (if (g.fuelTypes.isNotEmpty()) " · ${g.fuelTypes.joinToString(", ")}" else "") +
+                    (if (g.currencies.isNotEmpty()) " · ${g.currencies.joinToString(", ")}" else "")
                 _state.update {
-                    it.copy(googleStatus = tr(isNorwegian(), "Works: ${g.places.size} stations, $priced with price", "Virker: ${g.places.size} stasjoner, $priced med pris"))
+                    it.copy(googleStatus = tr(isNorwegian(), "Works: ${g.places.size} stations, $priced with price", "Virker: ${g.places.size} stasjoner, $priced med pris") + detail)
                 }
                 rebuild()
             }.onFailure { e ->

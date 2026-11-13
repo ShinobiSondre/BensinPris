@@ -126,7 +126,18 @@ object GoogleStore {
     private const val MAX_AGE = 30 * 60 * 1000L
     private fun file(ctx: Context) = File(ctx.filesDir, "google.json")
 
-    data class Result(val places: List<GooglePlace>, val at: Long, val lat: Double, val lng: Double, val radius: Int)
+    data class Result(
+        val places: List<GooglePlace>, val at: Long, val lat: Double, val lng: Double, val radius: Int,
+        /** What Google actually sent about fuel, for the test line in settings. */
+        val withFuelOptions: Int = 0, val fuelTypes: List<String> = emptyList(), val currencies: List<String> = emptyList(),
+    )
+
+    private fun diagnose(raw: String): Triple<Int, List<String>, List<String>> {
+        val withFuel = Regex("\"fuelOptions\"").findAll(raw).count()
+        val types = Regex("\"type\"\\s*:\\s*\"([A-Z0-9_]+)\"").findAll(raw).map { it.groupValues[1] }.distinct().toList()
+        val cur = Regex("\"currencyCode\"\\s*:\\s*\"([A-Z]+)\"").findAll(raw).map { it.groupValues[1] }.distinct().toList()
+        return Triple(withFuel, types, cur)
+    }
 
     fun read(ctx: Context): Result? = runCatching {
         val o = JSONObject(file(ctx).readText())
@@ -152,7 +163,8 @@ object GoogleStore {
         ))
         val now = System.currentTimeMillis()
         file(ctx).writeText(JSONObject().put("raw", raw).put("at", now).put("lat", lat).put("lng", lng).put("radius", radius).toString())
-        return Result(Parse.googlePlaces(raw), now, lat, lng, radius)
+        val (n, types, cur) = diagnose(raw)
+        return Result(Parse.googlePlaces(raw), now, lat, lng, radius, n, types, cur)
     }
 
     fun clear(ctx: Context) { file(ctx).delete() }
