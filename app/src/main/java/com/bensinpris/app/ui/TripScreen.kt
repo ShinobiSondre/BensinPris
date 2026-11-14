@@ -108,6 +108,7 @@ fun TripScreen(s: UiState, vm: MainViewModel, no: Boolean, now: Long, pad: Paddi
         } else {
             val cheapest = t.spots.firstOrNull { it.spot.price != null }
             val wide = maxWidth >= 720.dp
+            val mapHeight = maxHeight * 0.45f
             val mapPane: @Composable (Modifier) -> Unit = { m ->
                 TripMap(route, t.spots, cheapest?.spot?.station?.id, no, vm::select, m)
             }
@@ -126,7 +127,7 @@ fun TripScreen(s: UiState, vm: MainViewModel, no: Boolean, now: Long, pad: Paddi
             } else {
                 Column(Modifier.fillMaxSize()) {
                     TripHeader(t, route, s.fuel, no, vm, onEdit = { editing = true })
-                    mapPane(Modifier.fillMaxWidth().height(maxHeight * 0.45f))
+                    mapPane(Modifier.fillMaxWidth().height(mapHeight))
                     listPane(Modifier.weight(1f))
                 }
             }
