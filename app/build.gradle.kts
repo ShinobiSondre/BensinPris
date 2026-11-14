@@ -17,6 +17,8 @@ android {
         targetSdk = 35
         versionCode = runNumber
         versionName = "1.0.$runNumber"
+        // The map engine is native code: ship only phone CPUs to keep the APK small.
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     signingConfigs {
@@ -71,8 +73,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
     // Location (battery-friendly fused location)
     implementation("com.google.android.gms:play-services-location:21.3.0")
-    // Map with OpenStreetMap tiles (no key needed)
-    implementation("org.osmdroid:osmdroid-android:6.1.20")
+    // Vector map (MapLibre, OpenGL) with free OpenFreeMap tiles; no key needed
+    implementation("org.maplibre.gl:android-sdk:11.13.5")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

@@ -46,6 +46,20 @@ private val BadgeColors = listOf(
     Color(0xFF3A5A9C), Color(0xFF8A6A12), Color(0xFF7A3B5C), Color(0xFF406B6B),
 )
 
+fun badgeColor(brand: String, name: String): Color {
+    val key = brand.ifBlank { name }
+    return BadgeColors[(key.lowercase().hashCode() and 0x7fffffff) % BadgeColors.size]
+}
+
+fun initials(brand: String, name: String): String {
+    val parts = brand.ifBlank { name }.split(' ', '-').filter { it.isNotBlank() }
+    return when {
+        parts.size >= 2 -> "${parts[0].first()}${parts[1].first()}"
+        parts.size == 1 -> parts[0].take(2)
+        else -> "?"
+    }.uppercase()
+}
+
 /** Initials of the chain (or station) in a coloured circle. */
 @Composable
 fun BrandBadge(brand: String, name: String, size: Dp = 40.dp) {
@@ -56,7 +70,7 @@ fun BrandBadge(brand: String, name: String, size: Dp = 40.dp) {
         parts.size == 1 -> parts[0].take(2)
         else -> "?"
     }.uppercase()
-    val color = BadgeColors[(key.lowercase().hashCode() and 0x7fffffff) % BadgeColors.size]
+    val color = badgeColor(brand, name)
     Box(Modifier.size(size).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
         Text(initials, color = Color.White, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.36f).sp)
     }

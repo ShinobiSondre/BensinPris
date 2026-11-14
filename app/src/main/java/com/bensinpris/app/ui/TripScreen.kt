@@ -7,6 +7,18 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import com.bensinpris.app.data.Route
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -69,113 +81,153 @@ fun TripScreen(s: UiState, vm: MainViewModel, no: Boolean, now: Long, pad: Paddi
     val t = s.trip
     val ctx = LocalContext.current
     val focus = LocalFocusManager.current
-    val go = { focus.clearFocus(); vm.planTrip() }
+    var editing by rememberSaveable { mutableStateOf(false) }
+    val go = { focus.clearFocus(); editing = false; vm.planTrip() }
+    val route = t.route
+    val showForm = route == null || editing || t.loading || t.error != null
 
-    Column(Modifier.fillMaxSize().padding(pad)) {
-        // ---- where from, where to ----
-        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)) {
-            Text(tr(no, "Trip", "Tur"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedTextField(
-                        value = t.fromText, onValueChange = { vm.setTripText(from = it) },
-                        placeholder = { Text(tr(no, "My location", "Min posisjon")) },
-                        leadingIcon = { Icon(Icons.Filled.MyLocation, null, tint = MaterialTheme.colorScheme.primary) },
-                        singleLine = true, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                    )
-                    OutlinedTextField(
-                        value = t.toText, onValueChange = { vm.setTripText(to = it) },
-                        placeholder = { Text(tr(no, "Where to? (e.g. Bergen)", "Hvor skal du? (f.eks. Bergen)")) },
-                        leadingIcon = { Icon(Icons.Filled.Flag, null, tint = MaterialTheme.colorScheme.secondary) },
-                        singleLine = true, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { go() }),
+    BoxWithConstraints(Modifier.fillMaxSize().padding(pad)) {
+        if (showForm || route == null) {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                TripForm(t, no, vm, go,
+                    onCancel = if (route != null && !t.loading) ({ editing = false; vm.clearTripError() }) else null)
+                when {
+                    t.loading -> Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(10.dp))
+                        Text(tr(no, "Finding the route…", "Finner ruten …"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    t.error != null -> Text(t.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
+                    else -> Text(
+                        tr(no, "Enter where you're going. The app finds the route and the cheapest fuel along it, and you can drive there via Google Maps.",
+                            "Skriv hvor du skal. Appen finner ruten og det billigste drivstoffet langs den, og du kan kjøre dit via Google Maps."),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp),
                     )
                 }
-                IconButton(onClick = vm::swapTrip) { Icon(Icons.Filled.SwapVert, tr(no, "Swap", "Bytt")) }
             }
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Button(onClick = go, enabled = t.toText.isNotBlank() && !t.loading) {
-                    Icon(Icons.Filled.Search, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(tr(no, "Find fuel", "Finn drivstoff"))
+        } else {
+            val cheapest = t.spots.firstOrNull { it.spot.price != null }
+            val wide = maxWidth >= 720.dp
+            val mapPane: @Composable (Modifier) -> Unit = { m ->
+                TripMap(route, t.spots, cheapest?.spot?.station?.id, no, vm::select, m)
+            }
+            val listPane: @Composable (Modifier) -> Unit = { m ->
+                TripList(t, route.distanceM, cheapest, s.fuel, no, now, vm, m,
+                    onDrive = { st -> if (t.from != null && t.to != null) openUrl(ctx, Trip.directionsVia(t.from, t.to, st)) })
+            }
+            if (wide) {
+                Row(Modifier.fillMaxSize()) {
+                    Column(Modifier.width(420.dp).fillMaxHeight()) {
+                        TripHeader(t, route, s.fuel, no, vm, onEdit = { editing = true })
+                        listPane(Modifier.weight(1f))
+                    }
+                    mapPane(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(topStart = 24.dp)))
                 }
-                Spacer(Modifier.weight(1f))
-                CORRIDORS_KM.forEach { km ->
-                    FilterChip(selected = t.corridorKm == km, onClick = { vm.setCorridor(km) }, label = { Text("$km km") })
+            } else {
+                Column(Modifier.fillMaxSize()) {
+                    TripHeader(t, route, s.fuel, no, vm, onEdit = { editing = true })
+                    mapPane(Modifier.fillMaxWidth().height(maxHeight * 0.45f))
+                    listPane(Modifier.weight(1f))
                 }
             }
-            Text(
-                tr(no, "How far off the road a station may be.", "Hvor langt fra veien en stasjon kan ligge."),
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.End),
-            )
-            Spacer(Modifier.height(6.dp))
-            FuelPicker(s.fuel, no, vm::setFuel)
         }
+    }
+}
 
-        // ---- result ----
-        when {
-            t.loading -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator()
-                    Spacer(Modifier.height(10.dp))
-                    Text(tr(no, "Finding the route…", "Finner ruten …"), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            t.error != null -> Text(t.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
-            t.route == null -> Text(
-                tr(no, "Enter where you're going. The app finds the route and the cheapest fuel along it, and you can drive there via Google Maps.",
-                    "Skriv hvor du skal. Appen finner ruten og det billigste drivstoffet langs den, og du kan kjøre dit via Google Maps."),
-                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp),
-            )
-            else -> {
-                val route = t.route ?: return@Column
-                val cheapest = t.spots.firstOrNull { it.spot.price != null }
-                TripMap(
-                    route = route, spots = t.spots, cheapestId = cheapest?.spot?.station?.id, no = no,
-                    onSelect = vm::select,
-                    modifier = Modifier.padding(top = 10.dp).fillMaxWidth().height(250.dp),
+@Composable
+private fun TripForm(t: TripState, no: Boolean, vm: MainViewModel, go: () -> Unit, onCancel: (() -> Unit)?) {
+    Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)) {
+        Text(tr(no, "Trip", "Tur"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(
+                    value = t.fromText, onValueChange = { vm.setTripText(from = it) },
+                    placeholder = { Text(tr(no, "My location", "Min posisjon")) },
+                    leadingIcon = { Icon(Icons.Filled.MyLocation, null, tint = MaterialTheme.colorScheme.primary) },
+                    singleLine = true, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 )
-                LazyColumn(
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    item(key = "sum") {
-                        Text(
-                            "${t.fromName} → ${t.toName} · ${Format.distance(route.distanceM, no)} · ${Trip.duration(route.durationS, no)}",
-                            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            tr(no, "${t.spots.size} stations within ${t.corridorKm} km of the road · ${t.spots.count { it.spot.price != null }} with price",
-                                "${t.spots.size} stasjoner innen ${t.corridorKm} km fra veien · ${t.spots.count { it.spot.price != null }} med pris"),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    if (cheapest != null && t.from != null && t.to != null) item(key = "best") {
-                        TripHero(cheapest, t.spots, s.fuel, no, now,
-                            onDrive = { openUrl(ctx, Trip.directionsVia(t.from, t.to, cheapest.spot.station)) },
-                            onDetails = { vm.select(cheapest.spot.station.id) })
-                    }
-                    if (t.spots.isEmpty()) item(key = "none") {
-                        Text(tr(no, "No stations that close to the road. Try a wider distance.", "Ingen stasjoner så nær veien. Prøv en større avstand."),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    items(t.spots, key = { it.spot.station.id }) { ts ->
-                        TripRow(ts, route.distanceM, no, now, isCheapest = ts === cheapest,
-                            onClick = { vm.select(ts.spot.station.id) },
-                            onDrive = { if (t.from != null && t.to != null) openUrl(ctx, Trip.directionsVia(t.from, t.to, ts.spot.station)) })
-                    }
-                    item(key = "attrib") {
-                        Text(tr(no, "Route: OSRM · Map: © OpenStreetMap contributors", "Rute: OSRM · Kart: © OpenStreetMap-bidragsytere"),
-                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
+                OutlinedTextField(
+                    value = t.toText, onValueChange = { vm.setTripText(to = it) },
+                    placeholder = { Text(tr(no, "Where to? (e.g. Bergen)", "Hvor skal du? (f.eks. Bergen)")) },
+                    leadingIcon = { Icon(Icons.Filled.Flag, null, tint = MaterialTheme.colorScheme.secondary) },
+                    singleLine = true, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { go() }),
+                )
             }
+            IconButton(onClick = vm::swapTrip) { Icon(Icons.Filled.SwapVert, tr(no, "Swap", "Bytt")) }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = go, enabled = t.toText.isNotBlank() && !t.loading) {
+                Icon(Icons.Filled.Search, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(tr(no, "Find fuel", "Finn drivstoff"))
+            }
+            if (onCancel != null) TextButton(onClick = onCancel) { Text(tr(no, "Back to the map", "Tilbake til kartet")) }
+        }
+    }
+}
+
+/** The trip in one line, with fuel and distance-from-road choices. */
+@Composable
+private fun TripHeader(t: TripState, route: Route, fuel: FuelType, no: Boolean, vm: MainViewModel, onEdit: () -> Unit) {
+    Column(Modifier.padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("${t.fromName} → ${t.toName}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "${Format.distance(route.distanceM, no)} · ${Trip.duration(route.durationS, no)} · " +
+                        tr(no, "${t.spots.count { it.spot.price != null }} of ${t.spots.size} stations with price",
+                            "${t.spots.count { it.spot.price != null }} av ${t.spots.size} stasjoner med pris"),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            FilledTonalIconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, tr(no, "Change trip", "Endre tur")) }
+        }
+        Spacer(Modifier.height(8.dp))
+        FuelPicker(fuel, no, vm::setFuel)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(tr(no, "Off the road:", "Fra veien:"), style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            CORRIDORS_KM.forEach { km ->
+                FilterChip(selected = t.corridorKm == km, onClick = { vm.setCorridor(km) }, label = { Text("$km km") })
+            }
+        }
+    }
+}
+
+@Composable
+private fun TripList(
+    t: TripState, totalM: Double, cheapest: TripSpot?, fuel: FuelType, no: Boolean, now: Long,
+    vm: MainViewModel, modifier: Modifier, onDrive: (com.bensinpris.app.data.Station) -> Unit,
+) {
+    LazyColumn(
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier,
+    ) {
+        if (cheapest != null) item(key = "best") {
+            TripHero(cheapest, t.spots, fuel, no, now,
+                onDrive = { onDrive(cheapest.spot.station) },
+                onDetails = { vm.select(cheapest.spot.station.id) })
+        }
+        if (t.spots.isEmpty()) item(key = "none") {
+            Text(tr(no, "No stations that close to the road. Try a wider distance.", "Ingen stasjoner så nær veien. Prøv en større avstand."),
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        items(t.spots, key = { it.spot.station.id }) { ts ->
+            TripRow(ts, totalM, no, now, isCheapest = ts === cheapest,
+                onClick = { vm.select(ts.spot.station.id) },
+                onDrive = { onDrive(ts.spot.station) })
+        }
+        item(key = "attrib") {
+            Text(tr(no, "Map: OpenFreeMap · © OpenStreetMap contributors · Route: OSRM",
+                "Kart: OpenFreeMap · © OpenStreetMap-bidragsytere · Rute: OSRM"),
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

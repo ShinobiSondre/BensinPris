@@ -235,6 +235,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         it.copy(trip = it.trip.copy(fromText = from ?: it.trip.fromText, toText = to ?: it.trip.toText, error = null))
     }
 
+    fun clearTripError() = _state.update { it.copy(trip = it.trip.copy(error = null)) }
+
     fun swapTrip() = _state.update { it.copy(trip = it.trip.copy(fromText = it.trip.toText, toText = it.trip.fromText)) }
 
     fun setCorridor(km: Int) {
