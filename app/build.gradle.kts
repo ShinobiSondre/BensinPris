@@ -71,6 +71,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
     // Location (battery-friendly fused location)
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    // Map with OpenStreetMap tiles (no key needed)
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

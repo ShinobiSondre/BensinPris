@@ -10,6 +10,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.bensinpris.app.data.CachedFeed
 import com.bensinpris.app.data.ChainStore
+import com.bensinpris.app.data.LatLng
+import com.bensinpris.app.data.Route
+import com.bensinpris.app.data.RouteService
+import com.bensinpris.app.data.Trip
+import com.bensinpris.app.data.TripSpot
 import com.bensinpris.app.data.GoogleStore
 import com.bensinpris.app.data.WebStore
 import com.bensinpris.app.data.FuelType
@@ -38,6 +43,21 @@ import java.util.Locale
 
 data class Here(val lat: Double, val lng: Double, val isFallback: Boolean)
 
+/** The trip tab: from, to, the route and the stations along it. */
+data class TripState(
+    val fromText: String = "",
+    val toText: String = "",
+    val corridorKm: Int = 2,
+    val loading: Boolean = false,
+    val error: String? = null,
+    val from: LatLng? = null,
+    val to: LatLng? = null,
+    val fromName: String? = null,
+    val toName: String? = null,
+    val route: Route? = null,
+    val spots: List<TripSpot> = emptyList(),
+)
+
 data class UiState(
     val fuel: FuelType,
     val radiusKm: Int,
@@ -59,8 +79,12 @@ data class UiState(
     /** What happened on the last Google lookup, shown in settings. */
     val googleStatus: String? = null,
     val showSettings: Boolean = false,
+    val trip: TripState = TripState(),
 ) {
-    val selected: Spot? get() = selectedId?.let { id -> spots.firstOrNull { it.station.id == id } }
+    val selected: Spot?
+        get() = selectedId?.let { id ->
+            spots.firstOrNull { it.station.id == id } ?: trip.spots.firstOrNull { it.spot.station.id == id }?.spot
+        }
 }
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -146,6 +170,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun recompute() {
+        recomputeTrip()
         val s = _state.value
         val here = s.here ?: return
         val spots = Rank.spots(allStations, book, s.fuel, here.lat, here.lng, s.radiusKm * 1000.0, s.sort)
@@ -157,7 +182,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val towns = Parse.nearbyTowns(_state.value.spots)
         if (towns.isEmpty()) return
         webJob?.cancel()
-        webJob = viewModelScope.launch {
+        webJob = fetchTowns(towns, force)
+    }
+
+    private fun fetchTowns(towns: List<String>, force: Boolean) =
+        viewModelScope.launch {
             var changed = false
             for (town in towns) {
                 val key = town.lowercase()
@@ -170,7 +199,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (changed) rebuild()
         }
-    }
 
     /** Google Maps prices around you, if you've added an API key. */
     private fun loadGoogle(force: Boolean) {
@@ -200,6 +228,80 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    // ---- trip ----
+
+    fun setTripText(from: String? = null, to: String? = null) = _state.update {
+        it.copy(trip = it.trip.copy(fromText = from ?: it.trip.fromText, toText = to ?: it.trip.toText, error = null))
+    }
+
+    fun swapTrip() = _state.update { it.copy(trip = it.trip.copy(fromText = it.trip.toText, toText = it.trip.fromText)) }
+
+    fun setCorridor(km: Int) {
+        _state.update { it.copy(trip = it.trip.copy(corridorKm = km)) }
+        recomputeTrip()
+    }
+
+    /** Finds both places, gets the driving route and the stations along it. */
+    fun planTrip() {
+        val t = _state.value.trip
+        if (t.toText.isBlank() || t.loading) return
+        val no = isNorwegian()
+        _state.update { it.copy(trip = it.trip.copy(loading = true, error = null)) }
+        viewModelScope.launch {
+            val here = _state.value.here
+            val from = if (t.fromText.isBlank()) {
+                here?.let { LatLng(it.lat, it.lng) to tr(no, "My location", "Min posisjon") }
+            } else withContext(Dispatchers.IO) { geocode(t.fromText) }
+            val to = withContext(Dispatchers.IO) { geocode(t.toText) }
+            val problem = when {
+                from == null && t.fromText.isBlank() -> tr(no, "Your location isn't known yet.", "Posisjonen din er ikke kjent ennå.")
+                from == null -> tr(no, "Couldn't find \"${t.fromText}\".", "Fant ikke «${t.fromText}».")
+                to == null -> tr(no, "Couldn't find \"${t.toText}\".", "Fant ikke «${t.toText}».")
+                else -> null
+            }
+            if (problem != null || from == null || to == null) {
+                _state.update { it.copy(trip = it.trip.copy(loading = false, error = problem)) }
+                return@launch
+            }
+            val route = withContext(Dispatchers.IO) { runCatching { RouteService.route(from.first, to.first) }.getOrNull() }
+            if (route == null) {
+                _state.update {
+                    it.copy(trip = it.trip.copy(loading = false,
+                        error = tr(no, "Couldn't get a driving route. Check your internet and try again.",
+                            "Fikk ikke hentet kjørerute. Sjekk internett og prøv igjen.")))
+                }
+                return@launch
+            }
+            _state.update {
+                it.copy(trip = it.trip.copy(loading = false, from = from.first, to = to.first,
+                    fromName = from.second, toName = to.second, route = route))
+            }
+            recomputeTrip()
+            // Station prices for the towns along the way, in driving order.
+            val towns = _state.value.trip.spots.sortedBy { it.alongM }.map { it.spot.station.city.trim() }
+                .filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(10)
+            if (towns.isNotEmpty()) fetchTowns(towns, force = false)
+        }
+    }
+
+    private fun recomputeTrip() {
+        val t = _state.value.trip
+        val route = t.route ?: return
+        val spots = Trip.alongRoute(allStations, book, _state.value.fuel, route, t.corridorKm * 1000.0)
+        _state.update { it.copy(trip = it.trip.copy(spots = spots)) }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun geocode(q: String): Pair<LatLng, String>? = runCatching {
+        if (!Geocoder.isPresent()) return null
+        // Look inside Norway (and a bit around it) first, then anywhere.
+        val g = Geocoder(ctx, Locale.forLanguageTag("nb-NO"))
+        val a = g.getFromLocationName(q, 1, 57.5, 4.0, 71.5, 31.5)?.firstOrNull()
+            ?: g.getFromLocationName(q, 1)?.firstOrNull()
+            ?: return null
+        LatLng(a.latitude, a.longitude) to (a.locality ?: a.featureName ?: q)
+    }.getOrNull()
 
     fun openSettings(show: Boolean) = _state.update { it.copy(showSettings = show) }
 

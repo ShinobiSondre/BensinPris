@@ -15,6 +15,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // OpenStreetMap asks apps to name themselves; tiles are cached in the app's cache folder.
+        org.osmdroid.config.Configuration.getInstance().apply {
+            userAgentValue = "BensinPris/${BuildConfig.VERSION_NAME} (github.com/ShinobiSondre/BensinPris)"
+            osmdroidBasePath = java.io.File(cacheDir, "osmdroid")
+            osmdroidTileCache = java.io.File(cacheDir, "osmdroid/tiles")
+        }
         Updater.start(this)
         setContent {
             BensinPrisTheme {

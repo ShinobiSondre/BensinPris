@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocalGasStation
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Refresh
@@ -42,6 +43,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -53,6 +56,9 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -92,8 +98,19 @@ fun HomeScreen(vm: MainViewModel) {
         if (vm.hasPermission()) vm.onPermissionResult(true) else askPermission()
     }
 
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { pad ->
-        PullToRefreshBox(
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(selected = tab == 0, onClick = { tab = 0 },
+                    icon = { Icon(Icons.Filled.LocalGasStation, null) }, label = { Text(tr(no, "Near me", "Nær meg")) })
+                NavigationBarItem(selected = tab == 1, onClick = { tab = 1 },
+                    icon = { Icon(Icons.Filled.Map, null) }, label = { Text(tr(no, "Trip", "Tur")) })
+            }
+        },
+    ) { pad ->
+        if (tab == 1) TripScreen(s, vm, no, now, pad) else PullToRefreshBox(
             isRefreshing = s.refreshing,
             onRefresh = { vm.refresh(force = true) },
             modifier = Modifier.padding(pad).fillMaxSize(),

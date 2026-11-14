@@ -170,6 +170,31 @@ object GoogleStore {
     fun clear(ctx: Context) { file(ctx).delete() }
 }
 
+/**
+ * Driving routes from OSRM: first the FOSSGIS server that openstreetmap.org uses, then the OSRM demo
+ * server. Both are free for light use like this (one request when you plan a trip).
+ */
+object RouteService {
+    private val SERVERS = listOf(
+        "https://routing.openstreetmap.de/routed-car/route/v1/driving/",
+        "https://router.project-osrm.org/route/v1/driving/",
+    )
+
+    suspend fun route(a: LatLng, b: LatLng): Route {
+        var last: Exception? = null
+        for (base in SERVERS) {
+            try {
+                val json = Http.get("$base${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson", timeoutMs = 25_000)
+                Trip.osrmRoute(json)?.let { return it }
+                last = IllegalStateException("No route")
+            } catch (e: Exception) {
+                last = e
+            }
+        }
+        throw last ?: IllegalStateException("No route")
+    }
+}
+
 /** Prices you typed in yourself, kept only on this phone. */
 object MyPrices {
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("my_prices", Context.MODE_PRIVATE)

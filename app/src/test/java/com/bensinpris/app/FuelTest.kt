@@ -298,4 +298,49 @@ class FuelTest {
         val google = mapOf("x" to mapOf(FuelType.PETROL95 to FuelPrice(20.87, now - 3 * Format.HOUR, 1, PriceSource.GOOGLE, "Google")))
         assertEquals(20.87, Parse.merge(chain, web, google)["x"]!![FuelType.PETROL95]!!.price, 1e-9)
     }
+
+    // ---- trip ----
+
+    // A straight road going north from Oslo, about 11 km long.
+    private val osrm = """
+        {"code":"Ok","routes":[{"distance":11120.5,"duration":720.0,
+          "geometry":{"type":"LineString","coordinates":[[10.70,59.90],[10.70,59.95],[10.70,60.00]]}}]}
+    """.trimIndent()
+
+    @Test fun reads_osrm_route() {
+        val r = com.bensinpris.app.data.Trip.osrmRoute(osrm)!!
+        assertEquals(3, r.points.size)
+        assertEquals(59.90, r.points[0].lat, 0.0)
+        assertEquals(10.70, r.points[0].lng, 0.0)
+        assertEquals(11120.5, r.distanceM, 0.0)
+        assertNull(com.bensinpris.app.data.Trip.osrmRoute("""{"code":"NoRoute","routes":[]}"""))
+    }
+
+    @Test fun finds_cheapest_station_close_to_the_route() {
+        val route = com.bensinpris.app.data.Trip.osrmRoute(osrm)!!
+        val onRoad = Station("on", "On road", "", "", "", 59.93, 10.7001)      // ~6 m off, ~3.3 km in
+        val near = Station("near", "Near", "", "", "", 59.97, 10.715)          // ~840 m off
+        val far = Station("far", "Far", "", "", "", 59.95, 10.80)              // ~5.6 km off
+        val book = mapOf(
+            "on" to mapOf(FuelType.PETROL95 to p(21.9, 1)),
+            "near" to mapOf(FuelType.PETROL95 to p(20.9, 1)),
+            "far" to mapOf(FuelType.PETROL95 to p(15.0, 1)),
+        )
+        val within1 = com.bensinpris.app.data.Trip.alongRoute(listOf(onRoad, near, far), book, FuelType.PETROL95, route, 1000.0)
+        assertEquals(listOf("near", "on"), within1.map { it.spot.station.id })
+        assertEquals(840.0, within1[0].offM, 30.0)
+        assertEquals(3_340.0, within1[1].alongM, 60.0)
+        val within500 = com.bensinpris.app.data.Trip.alongRoute(listOf(onRoad, near, far), book, FuelType.PETROL95, route, 500.0)
+        assertEquals(listOf("on"), within500.map { it.spot.station.id })
+    }
+
+    @Test fun trip_links_and_times() {
+        val via = Station("x", "X", "", "", "", 59.95, 10.71)
+        assertEquals(
+            "https://www.google.com/maps/dir/?api=1&origin=59.9,10.7&destination=60.0,10.7&waypoints=59.95,10.71&travelmode=driving",
+            com.bensinpris.app.data.Trip.directionsVia(com.bensinpris.app.data.LatLng(59.9, 10.7), com.bensinpris.app.data.LatLng(60.0, 10.7), via),
+        )
+        assertEquals("2 t 35 min", com.bensinpris.app.data.Trip.duration(2 * 3600.0 + 35 * 60, true))
+        assertEquals("12 min", com.bensinpris.app.data.Trip.duration(720.0, false))
+    }
 }
