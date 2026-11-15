@@ -343,4 +343,48 @@ class FuelTest {
         assertEquals("2 t 35 min", com.bensinpris.app.data.Trip.duration(2 * 3600.0 + 35 * 60, true))
         assertEquals("12 min", com.bensinpris.app.data.Trip.duration(720.0, false))
     }
+
+    // ---- "fill up now" ----
+
+    private val today = java.time.LocalDate.of(2026, 11, 15)
+    private val nowMs = 1_000L * Format.DAY
+    private fun spotAt(id: String, price: Double?, at: Long = nowMs, src: PriceSource = PriceSource.GOOGLE) =
+        com.bensinpris.app.data.Spot(Station(id, id, "", "", "", 59.0, 10.0), 1000.0,
+            price?.let { FuelPrice(it, at, 1, src, if (src == PriceSource.CHAIN) "Uno-X" else null) }, emptyMap())
+    private fun week(vararg prices: Double) = prices.mapIndexed { i, v ->
+        com.bensinpris.app.data.DayLow(today.minusDays(i + 1L), FuelType.PETROL95, v)
+    }
+
+    @Test fun alerts_when_clearly_below_last_week() {
+        val a = com.bensinpris.app.data.Deal.check(listOf(spotAt("a", 21.2), spotAt("b", 22.5)), FuelType.PETROL95,
+            week(22.0, 22.2, 21.9, 22.1), null, today, nowMs)!!
+        assertEquals("a", a.spot.station.id)
+        assertEquals(com.bensinpris.app.data.AlertBasis.LAST_WEEK, a.basis)
+        assertEquals(22.05 - 21.2, a.drop, 1e-9)
+    }
+
+    @Test fun no_alert_for_a_small_drop_or_old_prices() {
+        assertNull(com.bensinpris.app.data.Deal.check(listOf(spotAt("a", 21.7)), FuelType.PETROL95, week(22.0, 22.0, 22.0), null, today, nowMs))
+        // A cheap price from three days ago isn't "now".
+        assertNull(com.bensinpris.app.data.Deal.check(listOf(spotAt("a", 19.0, nowMs - 3 * Format.DAY)), FuelType.PETROL95, week(22.0, 22.0, 22.0), null, today, nowMs))
+        // Other fuels and today's own low don't count as last week.
+        val mixed = listOf(com.bensinpris.app.data.DayLow(today, FuelType.PETROL95, 15.0)) + week(22.0, 22.0).map { it } +
+            listOf(com.bensinpris.app.data.DayLow(today.minusDays(3), FuelType.DIESEL, 26.0))
+        assertNull(com.bensinpris.app.data.Deal.lastWeekAverage(mixed, FuelType.PETROL95, today))
+    }
+
+    @Test fun without_history_only_real_prices_well_below_national_alert() {
+        val national = 22.6
+        // A chain estimate never triggers the national comparison.
+        assertNull(com.bensinpris.app.data.Deal.check(listOf(spotAt("a", 21.0, src = PriceSource.CHAIN)), FuelType.PETROL95, emptyList(), national, today, nowMs))
+        // A real price 0.8 below is not enough without history …
+        assertNull(com.bensinpris.app.data.Deal.check(listOf(spotAt("a", 21.8)), FuelType.PETROL95, emptyList(), national, today, nowMs))
+        // … but 1.6 below is.
+        val a = com.bensinpris.app.data.Deal.check(listOf(spotAt("a", 21.0)), FuelType.PETROL95, emptyList(), national, today, nowMs)!!
+        assertEquals(com.bensinpris.app.data.AlertBasis.NATIONAL, a.basis)
+    }
+
+    @Test fun national_typical_is_the_middle_chain_price() {
+        assertEquals(22.62, com.bensinpris.app.data.Deal.nationalTypical(Parse.chainPrices(chainHtml), FuelType.PETROL95)!!, 1e-9)
+    }
 }

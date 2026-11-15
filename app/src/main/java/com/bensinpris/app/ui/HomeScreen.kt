@@ -177,7 +177,14 @@ fun HomeScreen(vm: MainViewModel) {
         SettingsSheet(
             no = no, keySet = s.googleKeySet, status = s.googleStatus,
             onSave = vm::saveGoogleKey, onDismiss = { vm.openSettings(false) },
+            alertsOn = s.alertsOn, onAlerts = vm::setAlertsOn, onPreview = vm::previewAlert,
         )
+    }
+
+    s.alert?.let { a ->
+        CheapSplash(a, no,
+            onDrive = { openUrl(ctx, Rank.directionsUrl(a.spot.station)); vm.dismissAlert() },
+            onDismiss = vm::dismissAlert)
     }
 
     s.selected?.let { spot ->

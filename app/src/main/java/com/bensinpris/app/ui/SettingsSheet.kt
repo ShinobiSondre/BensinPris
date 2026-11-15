@@ -11,8 +11,12 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -25,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -37,11 +42,27 @@ import androidx.compose.ui.unit.dp
 fun SettingsSheet(
     no: Boolean, keySet: Boolean, status: String?,
     onSave: (String) -> Unit, onDismiss: () -> Unit,
+    alertsOn: Boolean, onAlerts: (Boolean) -> Unit, onPreview: () -> Unit,
 ) {
     val ctx = LocalContext.current
     var key by remember { mutableStateOf("") }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding()) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding()) {
+            Text(tr(no, "Cheap fuel alert", "Varsel om billig bensin"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    tr(no,
+                        "When fuel within 10 km is clearly cheaper than last week (at least 0.50 kr/l), the app greets you with a full screen saying so. At most once a day per fuel.",
+                        "Når drivstoffet innen 10 km er tydelig billigere enn forrige uke (minst 50 øre/l), møter appen deg med en hel skjerm om det. Høyst én gang om dagen per drivstoff."),
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(12.dp))
+                Switch(checked = alertsOn, onCheckedChange = onAlerts)
+            }
+            TextButton(onClick = onPreview) { Text(tr(no, "Show an example", "Vis et eksempel")) }
+            HorizontalDivider(Modifier.padding(vertical = 14.dp))
             Text(tr(no, "Prices from Google", "Priser fra Google"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             Text(

@@ -233,6 +233,31 @@ object MyPrices {
     }
 }
 
+/** The lowest current price near you, one per day and fuel, kept for 30 days. */
+object PriceHistory {
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("history", Context.MODE_PRIVATE)
+
+    fun load(ctx: Context): List<DayLow> = runCatching {
+        val arr = JSONArray(prefs(ctx).getString("lows", "[]"))
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.getJSONObject(i)
+            val fuel = FuelType.fromKey(o.optString("f")) ?: return@mapNotNull null
+            DayLow(java.time.LocalDate.parse(o.getString("d")), fuel, o.getDouble("p"))
+        }
+    }.getOrDefault(emptyList())
+
+    /** Keeps the lowest price seen today. Returns quickly when nothing changes. */
+    fun record(ctx: Context, day: java.time.LocalDate, fuel: FuelType, price: Double) {
+        val all = load(ctx)
+        val old = all.firstOrNull { it.day == day && it.fuel == fuel }
+        if (old != null && old.price <= price) return
+        val keep = all.filter { !(it.day == day && it.fuel == fuel) && it.day >= day.minusDays(30) } + DayLow(day, fuel, price)
+        val arr = JSONArray()
+        keep.forEach { arr.put(JSONObject().put("d", it.day.toString()).put("f", it.fuel.key).put("p", it.price)) }
+        prefs(ctx).edit().putString("lows", arr.toString()).apply()
+    }
+}
+
 /** Choices remembered between launches. */
 object Prefs {
     private fun p(ctx: Context) = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -242,6 +267,13 @@ object Prefs {
 
     fun radiusKm(ctx: Context) = p(ctx).getInt("radius", 10)
     fun setRadiusKm(ctx: Context, km: Int) = p(ctx).edit().putInt("radius", km).apply()
+
+    fun alertsOn(ctx: Context) = p(ctx).getBoolean("alerts", true)
+    fun setAlertsOn(ctx: Context, on: Boolean) = p(ctx).edit().putBoolean("alerts", on).apply()
+
+    /** "2026-11-15:petrol95" for the last alert shown, so each fuel alerts at most once a day. */
+    fun alertShown(ctx: Context) = p(ctx).getString("alert_shown", "").orEmpty()
+    fun setAlertShown(ctx: Context, v: String) = p(ctx).edit().putString("alert_shown", v).apply()
 
     fun googleKey(ctx: Context) = p(ctx).getString("google_key", "").orEmpty()
     fun setGoogleKey(ctx: Context, k: String) = p(ctx).edit().putString("google_key", k.trim()).apply()

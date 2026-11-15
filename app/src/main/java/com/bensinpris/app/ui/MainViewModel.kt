@@ -10,6 +10,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.bensinpris.app.data.CachedFeed
 import com.bensinpris.app.data.ChainStore
+import com.bensinpris.app.data.AlertBasis
+import com.bensinpris.app.data.CheapAlert
+import com.bensinpris.app.data.Deal
+import com.bensinpris.app.data.PriceHistory
 import com.bensinpris.app.data.LatLng
 import com.bensinpris.app.data.Route
 import com.bensinpris.app.data.RouteService
@@ -80,6 +84,9 @@ data class UiState(
     val googleStatus: String? = null,
     val showSettings: Boolean = false,
     val trip: TripState = TripState(),
+    /** "Fill up now" splash, when fuel near you is unusually cheap. */
+    val alert: CheapAlert? = null,
+    val alertsOn: Boolean = true,
 ) {
     val selected: Spot?
         get() = selectedId?.let { id ->
@@ -123,7 +130,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             chains = ChainStore.read(ctx)
             google = GoogleStore.read(ctx)
         }
-        _state.update { it.copy(googleKeySet = Prefs.googleKey(ctx).isNotBlank()) }
+        _state.update { it.copy(googleKeySet = Prefs.googleKey(ctx).isNotBlank(), alertsOn = Prefs.alertsOn(ctx)) }
         rebuild()
     }
 
@@ -175,6 +182,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val here = s.here ?: return
         val spots = Rank.spots(allStations, book, s.fuel, here.lat, here.lng, s.radiusKm * 1000.0, s.sort)
         _state.update { it.copy(spots = spots, summary = Rank.summary(spots)) }
+        checkAlert()
     }
 
     /** Station prices from the price website for the towns around you (cached 3 hours per town). */
@@ -226,6 +234,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 } ?: (e.message ?: "?")
                 _state.update { it.copy(googleStatus = tr(isNorwegian(), "Error: $msg", "Feil: $msg")) }
             }
+        }
+    }
+
+    // ---- "fill up now" ----
+
+    /** Records today's low near you and shows the splash if fuel is clearly cheaper than usual. */
+    private fun checkAlert() {
+        val st = _state.value
+        val here = st.here ?: return
+        if (here.isFallback) return
+        val fuel = st.fuel
+        val now = System.currentTimeMillis()
+        val today = java.time.LocalDate.now()
+        // Always within 10 km, so days compare fairly whatever distance is picked on screen.
+        val near = Rank.spots(allStations, book, fuel, here.lat, here.lng, 10_000.0, SortBy.PRICE)
+        Deal.cheapestCurrent(near, now)?.let { PriceHistory.record(ctx, today, fuel, it.price!!.price) }
+        if (!st.alertsOn || st.alert != null) return
+        val key = "$today:${fuel.key}"
+        if (Prefs.alertShown(ctx) == key) return
+        val a = Deal.check(near, fuel, PriceHistory.load(ctx), Deal.nationalTypical(chains.chains, fuel), today, now) ?: return
+        Prefs.setAlertShown(ctx, key)
+        _state.update { it.copy(alert = a) }
+    }
+
+    fun dismissAlert() = _state.update { it.copy(alert = null) }
+
+    fun setAlertsOn(on: Boolean) {
+        Prefs.setAlertsOn(ctx, on)
+        _state.update { it.copy(alertsOn = on) }
+    }
+
+    /** Shows what the splash looks like, using the cheapest price near you (or a made-up one). */
+    fun previewAlert() {
+        val st = _state.value
+        val best = st.summary?.cheapest ?: st.spots.firstOrNull()
+        val price = best?.price ?: com.bensinpris.app.data.FuelPrice(20.49, System.currentTimeMillis(), 1, com.bensinpris.app.data.PriceSource.COMMUNITY)
+        val spot = best ?: Spot(Station("example", "Eksempel Stasjon", "", "Storgata 1", "", OSLO_LAT, OSLO_LNG), 1200.0, price, emptyMap())
+        _state.update {
+            it.copy(showSettings = false, alert = CheapAlert(spot.copy(price = price), st.fuel, price, price.price + 1.24, AlertBasis.LAST_WEEK, example = true))
         }
     }
 

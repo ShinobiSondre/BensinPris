@@ -3,9 +3,9 @@ package com.bensinpris.app.data
 // Plain data types. No Android in this file, so it can be unit-tested.
 
 enum class FuelType(val key: String, val no: String, val en: String) {
-    PETROL95("petrol95", "Bensin 95", "Petrol 95"),
+    PETROL95("petrol95", "Bensin 95", "Bensin 95"),
     DIESEL("diesel", "Diesel", "Diesel"),
-    PETROL98("petrol98", "Bensin 98", "Petrol 98");
+    PETROL98("petrol98", "Bensin 98", "Bensin 98");
 
     fun label(norwegian: Boolean) = if (norwegian) no else en
 
