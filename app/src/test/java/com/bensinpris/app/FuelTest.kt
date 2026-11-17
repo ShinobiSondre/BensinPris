@@ -387,4 +387,24 @@ class FuelTest {
     @Test fun national_typical_is_the_middle_chain_price() {
         assertEquals(22.62, com.bensinpris.app.data.Deal.nationalTypical(Parse.chainPrices(chainHtml), FuelType.PETROL95)!!, 1e-9)
     }
+
+    @Test fun local_price_war_is_kept_but_a_lone_low_price_is_not() {
+        val chains = Parse.chainPrices(chainHtml) // national diesel middle 25.58, ST1 has no diesel here
+        fun ws(name: String, lat: Double, diesel: Double, p95: Double? = null) =
+            WebStation(name, lat, 10.22, listOfNotNull(FuelType.DIESEL to diesel, p95?.let { FuelType.PETROL95 to it }).toMap())
+        val ours = listOf(
+            Station("st1", "St1 Brakerøya", "St1", "", "Drammen", 59.7410, 10.22),
+            Station("ck", "Circle K Strømsø", "Circle K", "", "Drammen", 59.7500, 10.22),
+            Station("es", "Esso Park", "Esso", "", "Drammen", 59.7600, 10.22),
+        )
+        // Diesel at ~21.7 everywhere in town: 15 % below normal, but three stations agree. St1's 95 at 29.41 is far too high.
+        val war = listOf(ws("Brakerøya", 59.7410, 21.65, 29.41), ws("Strømsø", 59.7500, 21.70), ws("Park", 59.7600, 21.79))
+        val book = Parse.matchWeb(ours, war, chains, 1L)
+        assertEquals(21.65, book["st1"]!![FuelType.DIESEL]!!.price, 0.0)
+        assertNull(book["st1"]!![FuelType.PETROL95])
+        assertEquals(3, book.size)
+        // The same low price at one station alone is dropped.
+        val lone = listOf(ws("Brakerøya", 59.7410, 21.65), ws("Strømsø", 59.7500, 25.70), ws("Park", 59.7600, 25.79))
+        assertNull(Parse.matchWeb(ours, lone, chains, 1L)["st1"])
+    }
 }

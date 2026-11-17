@@ -200,16 +200,21 @@ object Parse {
 
     /**
      * Puts website prices on our stations (nearest within [maxM]). Prices that look wrong are dropped:
-     * more than [maxOff] away from the chain's typical price (or from the national middle, if the chain
-     * isn't listed), or 98 cheaper than 95 at the same station.
+     *  - more than [maxOff] ABOVE the chain's typical price (or the national middle, if the chain isn't listed);
+     *  - more than [maxOff] BELOW it, unless at least [peers] other stations on the same page are within
+     *    [peerBand] of it (a local price war, which really happens) and it is no more than [maxWar] below;
+     *  - 98 cheaper than 95 at the same station.
      */
     fun matchWeb(
         stations: List<Station>, web: List<WebStation>, chains: List<ChainPrice>, at: Long,
-        maxM: Double = 150.0, maxOff: Double = 0.15,
+        maxM: Double = 150.0, maxOff: Double = 0.15, maxWar: Double = 0.30, peerBand: Double = 0.06, peers: Int = 2,
     ): PriceBook {
         val national = FuelType.entries.associateWith { f ->
             chains.mapNotNull { it.prices[f] }.sorted().let { if (it.isEmpty()) null else it[it.size / 2] }
         }
+        fun supported(w: WebStation, fuel: FuelType, v: Double) =
+            web.count { o -> o !== w && o.prices[fuel]?.let { kotlin.math.abs(it - v) / v <= peerBand } == true } >= peers
+
         val out = HashMap<String, Map<FuelType, FuelPrice>>()
         for (w in web) {
             val dLat = maxM / 111_000.0
@@ -221,7 +226,14 @@ object Parse {
             val chain = chainFor(st, chains)
             val ok = w.prices.filter { (fuel, v) ->
                 val ref = chain?.prices?.get(fuel) ?: national[fuel]
-                ref == null || kotlin.math.abs(v - ref) / ref <= maxOff
+                if (ref == null) return@filter true
+                val off = (v - ref) / ref
+                when {
+                    off > maxOff -> false
+                    off >= -maxOff -> true
+                    off >= -maxWar -> supported(w, fuel, v)
+                    else -> false
+                }
             }.toMutableMap()
             val p95 = ok[FuelType.PETROL95]
             val p98 = ok[FuelType.PETROL98]
