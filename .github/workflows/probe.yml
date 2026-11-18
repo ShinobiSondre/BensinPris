@@ -1,0 +1,28 @@
+name: Probe data sources
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe drivstoffprisene.no
+        run: |
+          set +e
+          U=https://drivstoffprisene.no
+          curl -sS -m 30 $U/robots.txt | head -40 | sed 's/^/ROBOTS /'
+          curl -sS -m 30 -L -o index.html -w 'INDEX %{http_code} %{url_effective}\n' $U/
+          echo "INDEXBYTES $(wc -c < index.html)"
+          head -c 3000 index.html | tr '\n' ' ' | sed 's/^/HEAD /'; echo
+          for p in vilkar vilkår terms om personvern api om-oss; do echo "PAGE $p $(curl -s -o /dev/null -w '%{http_code}' -m 20 "$U/$p")"; done
+          # Scripts referenced by the page, and any API-looking URLs inside them.
+          grep -oE '(src|href)="[^"]+\.(js|json)[^"]*"' index.html | head -20 | sed 's/^/ASSET /'
+          for s in $(grep -oE 'src="[^"]+\.js[^"]*"' index.html | sed 's/src="//;s/"$//' | head -8); do
+            case "$s" in http*) url="$s";; /*) url="$U$s";; *) url="$U/$s";; esac
+            curl -sS -m 30 -o s.js "$url"
+            echo "SCRIPT $url $(wc -c < s.js)"
+            grep -oE '"(/[a-zA-Z0-9_./-]*(api|price|pris|station|stasjon)[a-zA-Z0-9_./?=&-]*)"|https?://[a-zA-Z0-9._-]+(/[a-zA-Z0-9_./?=&-]*)?(api|price|pris|station|stasjon|supabase|firebase)[a-zA-Z0-9_./?=&-]*' s.js | sort -u | head -30 | sed 's/^/APIURL /'
+            grep -oE '(supabase|firebaseio|firestore|apiKey|anon)[^,;]{0,80}' s.js | sort -u | head -10 | sed 's/^/KEYISH /'
+          done
+          grep -oE '(fetch|axios\.get)\([^)]{0,120}\)' index.html | head -10 | sed 's/^/FETCH /'
